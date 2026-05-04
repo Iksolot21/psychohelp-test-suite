@@ -1,0 +1,31 @@
+{
+  "name": "psychohelp-test-suite",
+  "version": "1.0.0",
+  "description": "Автоматизированное тестирование сайта psychohelp (Служба психологической помощи МПУ)",
+  "main": "test-suite.js",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "smoke":        "node test-suite.js --smoke",
+    "auth":         "node test-suite.js --auth",
+    "api":          "node test-suite.js --api",
+    "ui":           "node test-suite.js --ui",
+    "appointments": "node test-suite.js --appointments",
+    "security":     "node test-suite.js --security",
+    "test":         "node test-suite.js --all",
+    "help":         "node test-suite.js --help"
+  },
+  "keywords": [
+    "playwright",
+    "testing",
+    "automation",
+    "api-testing",
+    "e2e"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "playwright": "^1.52.0"
+  }
+}

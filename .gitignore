@@ -1,0 +1,38 @@
+# dependencies
+node_modules/
+
+# playwright browser binaries
+/playwright/.local-browsers
+
+# generated reports (keep the folder, ignore content)
+report-*.md
+report-*.json
+full-report-*.md
+
+# old exploratory scripts (not part of main suite)
+booking-test.js
+explore-booking-form.js
+final-booking.js
+full-flow.js
+full-flow-v2.js
+test-site.js
+
+# old raw output files
+full-flow-steps.json
+full-flow-report.md
+report.json
+report.md
+
+# OS
+.DS_Store
+Thumbs.db
+
+# editors
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# env
+.env
+.env.local

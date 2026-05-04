@@ -1,0 +1,71 @@
+name: Test Suite
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  schedule:
+    # Запускать каждый день в 06:00 UTC (09:00 МСК)
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Режим тестирования'
+        required: false
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - smoke
+          - auth
+          - api
+          - ui
+          - appointments
+          - security
+
+jobs:
+  test:
+    name: Run ${{ github.event.inputs.mode || 'all' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install chromium --with-deps
+
+      - name: Run smoke (always first)
+        run: node test-suite.js --smoke
+
+      - name: Run tests
+        run: node test-suite.js --${{ github.event.inputs.mode || 'all' }}
+
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports-${{ github.run_number }}
+          path: |
+            report-*.md
+            full-report-*.md
+          retention-days: 30
+
+      - name: Show summary
+        if: always()
+        run: |
+          echo "## Test Reports" >> $GITHUB_STEP_SUMMARY
+          for f in report-*.md full-report-*.md; do
+            [ -f "$f" ] && echo "- $f" >> $GITHUB_STEP_SUMMARY
+          done
