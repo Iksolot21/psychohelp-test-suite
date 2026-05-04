@@ -23,6 +23,7 @@ on:
           - ui
           - appointments
           - security
+          - admin
 
 jobs:
   test:
@@ -51,6 +52,11 @@ jobs:
 
       - name: Run tests
         run: node test-suite.js --${{ github.event.inputs.mode || 'all' }}
+        env:
+          BASE_URL:        ${{ secrets.BASE_URL }}
+          SLOW_MS:         ${{ secrets.SLOW_MS }}
+          ADMIN_EMAIL:     ${{ secrets.ADMIN_EMAIL }}
+          ADMIN_PASSWORD:  ${{ secrets.ADMIN_PASSWORD }}
 
       - name: Upload reports
         if: always()
@@ -69,3 +75,30 @@ jobs:
           for f in report-*.md full-report-*.md; do
             [ -f "$f" ] && echo "- $f" >> $GITHUB_STEP_SUMMARY
           done
+          if [ -f full-report-*.md ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### Итог" >> $GITHUB_STEP_SUMMARY
+            grep -h "^## Итог" full-report-*.md | head -1 >> $GITHUB_STEP_SUMMARY || true
+          fi
+
+      - name: Notify Telegram
+        if: always()
+        env:
+          TG_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TG_CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}
+          JOB_STATUS:   ${{ job.status }}
+          RUN_MODE:     ${{ github.event.inputs.mode || 'all' }}
+        run: |
+          if [ -z "$TG_BOT_TOKEN" ] || [ -z "$TG_CHAT_ID" ]; then exit 0; fi
+          SUMMARY=$(grep -h "^## Итог" report-*.md full-report-*.md 2>/dev/null | tail -1 || echo "нет данных")
+          EMOJI="✅"; [ "$JOB_STATUS" != "success" ] && EMOJI="❌"
+          TEXT="${EMOJI} *psychohelp-test-suite*
+Режим: \`${RUN_MODE}\`  |  Статус: \`${JOB_STATUS}\`
+${SUMMARY}
+[Открыть логи](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})"
+          curl -s -X POST "https://api.telegram.org/bot${TG_BOT_TOKEN}/sendMessage" \
+            -d "chat_id=${TG_CHAT_ID}" \
+            -d "parse_mode=Markdown" \
+            --data-urlencode "text=${TEXT}" \
+            -d "disable_web_page_preview=true" \
+            -o /dev/null
