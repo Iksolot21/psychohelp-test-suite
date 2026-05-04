@@ -23,6 +23,9 @@ on:
           - ui
           - appointments
           - security
+          - scenarios
+          - chaos
+          - edge
           - admin
 
 jobs:

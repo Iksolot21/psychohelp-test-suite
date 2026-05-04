@@ -887,6 +887,638 @@ async function runUi() {
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
+//  SCENARIOS  (комплексные поведенческие сценарии)
+// ═════════════════════════════════════════════════════════════════════════════
+async function runScenarios() {
+  console.log(`\n${C.bold}🎭  SCENARIOS — комплексные поведенческие сценарии${C.reset}\n`);
+
+  const trReq = await apiReq('GET', '/therapists/', null, null);
+  const th = Array.isArray(trReq.json) ? trReq.json[0] : null;
+  if (!th) {
+    rec('/api/therapists/', 'GET', '200+список', trReq.status, false, 'нет терапевтов — appointment-сценарии пропущены');
+  }
+
+  // ── 1. Profile update consistency ─────────────────────────────────────────
+  console.log(`\n  ${C.dim}— 1. Консистентность профиля: PUT → GET → verify —${C.reset}`);
+  {
+    let sess;
+    try {
+      sess = await newSession();
+      const uniqueName = `Авто${Date.now()}`;
+      const putR = await apiReq('PUT', '/users/me', { first_name: uniqueName }, sess.cookie);
+      rec('/api/users/me PUT (обновление имени)', 'PUT', 200, putR.status, putR.status === 200, '');
+      if (putR.status === 200) {
+        const getR = await apiReq('GET', '/users/user', null, sess.cookie);
+        const consistent = getR.json?.first_name === uniqueName;
+        rec('/api/users/user GET (имя после PUT)', 'GET', uniqueName, getR.json?.first_name || '?', consistent,
+          consistent ? 'поле совпадает ✓' : `⚠️ ожидал "${uniqueName}", получил "${getR.json?.first_name}"`);
+      }
+    } catch (e) {
+      rec('profile consistency', 'SCENARIO', 'ok', 'ошибка', null, e.message.slice(0, 80));
+    }
+  }
+
+  // ── 2. Stale cookie after logout ──────────────────────────────────────────
+  console.log(`\n  ${C.dim}— 2. Старый cookie после logout → должен 401 —${C.reset}`);
+  {
+    let sess;
+    try {
+      sess = await newSession();
+      const savedCookie = sess.cookie;
+      await apiReq('POST', '/users/logout', null, savedCookie);
+      const r = await apiReq('GET', '/users/user', null, savedCookie);
+      rec('/api/users/user (cookie после logout)', 'GET', 401, r.status, r.status === 401,
+        r.status === 200 ? '⚠️ КРИТИЧНО: сессия не инвалидирована после logout!' : 'сессия корректно инвалидирована ✓');
+    } catch (e) {
+      rec('stale cookie after logout', 'SCENARIO', 401, 'ошибка', null, e.message.slice(0, 80));
+    }
+  }
+
+  // ── 3. Password change: старые credentials должны перестать работать ──────
+  console.log(`\n  ${C.dim}— 3. После смены пароля: старый пароль → 4xx, новый → 200 —${C.reset}`);
+  {
+    let sess;
+    try {
+      sess = await newSession();
+      const oldPass = sess.pass;
+      const newPass = 'ChangedPass789!';
+      const chR = await apiReq('POST', '/users/me/password', { old_password: oldPass, new_password: newPass }, sess.cookie);
+      rec('/api/users/me/password (смена пароля)', 'POST', 200, chR.status, chR.status === 200, '');
+      if (chR.status === 200) {
+        const oldLoginR = await apiReq('POST', '/users/login', { email: sess.email, password: oldPass }, null);
+        rec('/api/users/login (старый пароль → 4xx)', 'POST', '4xx', oldLoginR.status,
+          oldLoginR.status >= 400,
+          oldLoginR.status < 400 ? '⚠️ КРИТИЧНО: старый пароль всё ещё принимается!' : 'отклонён ✓');
+        const newLoginR = await apiReq('POST', '/users/login', { email: sess.email, password: newPass }, null);
+        rec('/api/users/login (новый пароль → 200)', 'POST', 200, newLoginR.status, newLoginR.status === 200,
+          newLoginR.status !== 200 ? '⚠️ новый пароль не работает' : '');
+      }
+    } catch (e) {
+      rec('password change flow', 'SCENARIO', 'ok', 'ошибка', null, e.message.slice(0, 80));
+    }
+  }
+
+  // ── 4. Double-cancel appointment ──────────────────────────────────────────
+  console.log(`\n  ${C.dim}— 4. Двойная отмена: cancel → cancel снова → должен 4xx —${C.reset}`);
+  if (th) {
+    let sess;
+    try {
+      sess = await newSession();
+      const cr = await apiReq('POST', '/appointments/create', {
+        patient_id: sess.userId, psychologist_id: th.id, type: 'Online', scheduled_time: futureISO(), venue: 'https://meet.example.com/test',
+      }, sess.cookie);
+      const apptId = cr.json?.id;
+      if (apptId) {
+        const c1 = await apiReq('PUT', `/appointments/${apptId}/cancel`, { cancel_reason: 'первая отмена' }, sess.cookie);
+        rec('/api/appointments/{id}/cancel (первая отмена)', 'PUT', 200, c1.status, c1.status === 200, '');
+        const c2 = await apiReq('PUT', `/appointments/${apptId}/cancel`, { cancel_reason: 'повторная отмена' }, sess.cookie);
+        rec('/api/appointments/{id}/cancel (повторная → 4xx)', 'PUT', '4xx', c2.status,
+          c2.status >= 400 ? true : c2.status === 200 ? null : false,
+          c2.status === 200 ? '⚠️ двойная отмена принята (idempotent)?' : `отклонена с ${c2.status} ✓`);
+      } else {
+        rec('double-cancel setup', 'POST', '200/201', cr.status, null, 'appointment не создан');
+      }
+    } catch (e) {
+      rec('double-cancel', 'SCENARIO', '4xx', 'ошибка', null, e.message.slice(0, 80));
+    }
+  }
+
+  // ── 5. Cross-user data isolation ──────────────────────────────────────────
+  console.log(`\n  ${C.dim}— 5. Изоляция: user B не видит и не отменяет appointment user A —${C.reset}`);
+  if (th) {
+    try {
+      const [sessA, sessB] = await Promise.all([newSession(), newSession()]);
+      const cr = await apiReq('POST', '/appointments/create', {
+        patient_id: sessA.userId, psychologist_id: th.id, type: 'Online', scheduled_time: futureISO(), venue: 'https://meet.example.com/test',
+      }, sessA.cookie);
+      const apptId = cr.json?.id;
+      if (apptId) {
+        const rGet = await apiReq('GET', `/appointments/${apptId}`, null, sessB.cookie);
+        rec('/api/appointments/{id} GET (чужой → 403/404)', 'GET', '403/404', rGet.status,
+          rGet.status === 403 || rGet.status === 404 ? true : rGet.status === 200 ? false : null,
+          rGet.status === 200 ? '⚠️ КРИТИЧНО: user B видит данные user A!' : `запрещено: ${rGet.status} ✓`);
+        const rCancel = await apiReq('PUT', `/appointments/${apptId}/cancel`, { cancel_reason: 'чужой' }, sessB.cookie);
+        rec('/api/appointments/{id}/cancel (чужой → 403/404)', 'PUT', '403/404', rCancel.status,
+          rCancel.status === 403 || rCancel.status === 404 ? true : rCancel.status === 200 ? false : null,
+          rCancel.status === 200 ? '⚠️ КРИТИЧНО: user B отменил appointment user A!' : `запрещено: ${rCancel.status} ✓`);
+        await apiReq('PUT', `/appointments/${apptId}/cancel`, { cancel_reason: 'cleanup' }, sessA.cookie);
+      } else {
+        rec('cross-user isolation setup', 'POST', '200/201', cr.status, null, 'appointment не создан');
+      }
+    } catch (e) {
+      rec('cross-user isolation', 'SCENARIO', '403/404', 'ошибка', null, e.message.slice(0, 80));
+    }
+  }
+
+  // ── 6. Appointment in the past ────────────────────────────────────────────
+  console.log(`\n  ${C.dim}— 6. Запись на прошедшую дату → должен 422 —${C.reset}`);
+  if (th) {
+    let sess;
+    try {
+      sess = await newSession();
+      const yesterday = new Date(Date.now() - 2 * 24 * 3600 * 1000).toISOString().slice(0, 19);
+      const r = await apiReq('POST', '/appointments/create', {
+        patient_id: sess.userId, psychologist_id: th.id, type: 'Online', scheduled_time: yesterday, venue: 'https://meet.example.com/test',
+      }, sess.cookie);
+      rec('/api/appointments/create (вчерашняя дата → 422)', 'POST', '422/400', r.status,
+        r.status === 422 || r.status === 400 ? true : r.status === 200 || r.status === 201 ? null : false,
+        r.status === 200 || r.status === 201 ? '⚠️ сервер принял запись на прошедшее время!' : `отклонён: ${r.status} ✓`);
+      if (r.json?.id) await apiReq('PUT', `/appointments/${r.json.id}/cancel`, { cancel_reason: 'cleanup' }, sess.cookie);
+    } catch (e) {
+      rec('past-date appointment', 'SCENARIO', 422, 'ошибка', null, e.message.slice(0, 80));
+    }
+  }
+
+  // ── 7. Appointment far in future (2099) ───────────────────────────────────
+  console.log(`\n  ${C.dim}— 7. Запись на 2099 год — граница дат —${C.reset}`);
+  if (th) {
+    let sess;
+    try {
+      sess = await newSession();
+      const r = await apiReq('POST', '/appointments/create', {
+        patient_id: sess.userId, psychologist_id: th.id, type: 'Online', scheduled_time: '2099-12-31T23:59:59', venue: 'https://meet.example.com/test',
+      }, sess.cookie);
+      rec('/api/appointments/create (2099-12-31)', 'POST', '201 или 422', r.status,
+        r.status === 201 || r.status === 200 || r.status === 422,
+        r.status === 201 || r.status === 200 ? `принят (id=${r.json?.id?.slice(0, 8)}…)` : `отклонён: ${r.status}`);
+      if (r.json?.id) await apiReq('PUT', `/appointments/${r.json.id}/cancel`, { cancel_reason: 'cleanup' }, sess.cookie);
+    } catch (e) {
+      rec('far-future appointment', 'SCENARIO', '201/422', 'ошибка', null, e.message.slice(0, 80));
+    }
+  }
+
+  // ── 8. Same-slot double-booking ───────────────────────────────────────────
+  console.log(`\n  ${C.dim}— 8. Двойное бронирование одного слота — conflict или idempotent? —${C.reset}`);
+  if (th) {
+    let sess;
+    try {
+      sess = await newSession();
+      const slot = futureISO();
+      const body = { patient_id: sess.userId, psychologist_id: th.id, type: 'Online', scheduled_time: slot, venue: 'https://meet.example.com/test' };
+      const [r1, r2] = await Promise.all([
+        apiReq('POST', '/appointments/create', body, sess.cookie),
+        apiReq('POST', '/appointments/create', body, sess.cookie),
+      ]);
+      const created = [r1, r2].filter(r => r.status === 200 || r.status === 201);
+      const conflict = [r1, r2].filter(r => r.status >= 400);
+      rec('/api/appointments/create (двойной слот)', 'POST', '1×201 + 1×4xx', `${r1.status}/${r2.status}`,
+        created.length === 1 ? true : created.length === 2 ? null : false,
+        created.length === 2 ? '⚠️ оба слота приняты — сервер разрешает дубли' : created.length === 1 ? 'конфликт корректно обработан ✓' : `unexpected`);
+      for (const r of [r1, r2]) {
+        if (r.json?.id) await apiReq('PUT', `/appointments/${r.json.id}/cancel`, { cancel_reason: 'cleanup' }, sess.cookie);
+      }
+    } catch (e) {
+      rec('double-booking', 'SCENARIO', 'conflict', 'ошибка', null, e.message.slice(0, 80));
+    }
+  }
+
+  // ── 9. Rate limit probe ───────────────────────────────────────────────────
+  console.log(`\n  ${C.dim}— 9. Rate limiting: 20 неверных логинов подряд —${C.reset}`);
+  {
+    const fakeEmail = testEmail();
+    let got429 = false;
+    const statuses = [];
+    for (let i = 0; i < 20; i++) {
+      const r = await apiReq('POST', '/users/login', { email: fakeEmail, password: 'wrongpassword' }, null);
+      statuses.push(r.status);
+      if (r.status === 429) { got429 = true; break; }
+    }
+    const unique = [...new Set(statuses)].sort().join('/');
+    rec('/api/users/login (20× неверный пароль → rate limit?)', 'POST', '429 или 4xx',
+      unique, got429 ? true : null,
+      got429 ? `✓ rate limiting (429) на запросе №${statuses.indexOf(429) + 1}` : `⚠️ rate limiting отсутствует — ${statuses.length} запросов, статусы: ${unique}`);
+  }
+
+  // ── 10. Cross-user application isolation ──────────────────────────────────
+  console.log(`\n  ${C.dim}— 10. Изоляция заявок: user B не видит заявку user A —${C.reset}`);
+  if (th) {
+    try {
+      const [sessA, sessB] = await Promise.all([newSession(), newSession()]);
+      const cr = await apiReq('POST', '/applications/', {
+        psychologist_id:     th.id,
+        scheduled_at:        futureISO(),
+        problem_description: 'Автотест — изоляция заявок',
+        university_status:   'студент',
+      }, sessA.cookie);
+      const applId = cr.json?.id;
+      if (applId) {
+        const r = await apiReq('GET', `/applications/${applId}`, null, sessB.cookie);
+        rec('/api/applications/{id} GET (чужая → 403/404)', 'GET', '403/404', r.status,
+          r.status === 403 || r.status === 404 ? true : r.status === 200 ? false : null,
+          r.status === 200 ? '⚠️ КРИТИЧНО: user B видит заявку user A!' : `запрещено: ${r.status} ✓`);
+        await apiReq('POST', `/applications/${applId}/cancel`, { cancel_reason: 'cleanup', cancel_initiator: 'user' }, sessA.cookie);
+      } else {
+        rec('application isolation setup', 'POST', '200/201', cr.status, null, 'заявка не создана');
+      }
+    } catch (e) {
+      rec('application isolation', 'SCENARIO', '403/404', 'ошибка', null, e.message.slice(0, 80));
+    }
+  }
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  CHAOS  (конкурентность и нагрузка)
+// ═════════════════════════════════════════════════════════════════════════════
+async function runChaos() {
+  console.log(`\n${C.bold}💥  CHAOS — конкурентные запросы и нагрузка${C.reset}\n`);
+
+  function pct(arr, p) {
+    if (!arr.length) return 0;
+    const s = [...arr].sort((a, b) => a - b);
+    return s[Math.min(Math.ceil(p / 100 * s.length) - 1, s.length - 1)];
+  }
+
+  const trReq = await apiReq('GET', '/therapists/', null, null);
+  const th = Array.isArray(trReq.json) ? trReq.json[0] : null;
+
+  // ── 1. Concurrent registrations ───────────────────────────────────────────
+  console.log(`\n  ${C.dim}— 1. 10 параллельных регистраций —${C.reset}`);
+  {
+    const N = 10;
+    const results = await Promise.all(Array.from({ length: N }, () =>
+      apiReq('POST', '/users/register', {
+        first_name: 'Chaos', last_name: 'Test', phone_number: '+79991234567', email: testEmail(), password: 'TestPass123!',
+      }, null)
+    ));
+    const ok   = results.filter(r => r.status === 201 || r.status === 200);
+    const fail = results.filter(r => r.status !== 201 && r.status !== 200);
+    results.filter(r => r.json?.id).forEach(r => trackUser('chaos-reg', r.json.id));
+    rec(`10× concurrent POST /api/users/register`, 'PARALLEL', `${N}×201`, `${ok.length}×ok / ${fail.length}×fail`,
+      ok.length === N,
+      fail.length ? `упало: ${fail.map(r => r.status).join(', ')}` : `все ${N} созданы ✓`);
+  }
+
+  // ── 2. Concurrent reads with timing ──────────────────────────────────────
+  console.log(`\n  ${C.dim}— 2. 20 параллельных GET /therapists/ — время ответа —${C.reset}`);
+  {
+    const N = 20;
+    const results = await Promise.all(Array.from({ length: N }, () => apiReq('GET', '/therapists/', null, null)));
+    const ok    = results.filter(r => r.status === 200);
+    const times = results.map(r => r.ms);
+    const p50 = pct(times, 50), p95 = pct(times, 95), p99 = pct(times, 99);
+    rec(`20× concurrent GET /api/therapists/`, 'PARALLEL', `${N}×200`, `${ok.length}×200 p50=${p50}ms p95=${p95}ms`,
+      ok.length === N,
+      `p50=${p50}ms  p95=${p95}ms  p99=${p99}ms  max=${Math.max(...times)}ms`);
+    if (p95 > SLOW_MS) rec('concurrent GET (p95)', 'PERF', `<${SLOW_MS}ms`, `${p95}ms`, null, 'деградация p95 под параллельной нагрузкой');
+  }
+
+  // ── 3. Sequential load probe ──────────────────────────────────────────────
+  console.log(`\n  ${C.dim}— 3. 30 последовательных GET /therapists/ — деградация? —${C.reset}`);
+  {
+    const times = [];
+    for (let i = 0; i < 30; i++) {
+      const r = await apiReq('GET', '/therapists/', null, null);
+      times.push(r.ms);
+    }
+    const p50 = pct(times, 50), p95 = pct(times, 95);
+    const firstFive = times.slice(0, 5).reduce((a, b) => a + b, 0) / 5;
+    const lastFive  = times.slice(-5).reduce((a, b) => a + b, 0) / 5;
+    const trend = lastFive - firstFive;
+    rec('30× sequential GET /api/therapists/ (p50/p95)', 'LOAD', `p95<${SLOW_MS}ms`, `p50=${p50}ms p95=${p95}ms`,
+      p95 < SLOW_MS,
+      `trend: ${trend > 100 ? `⚠️ деградация +${Math.round(trend)}ms` : `✓ стабильно (${trend > 0 ? '+' : ''}${Math.round(trend)}ms)`}  min=${Math.min(...times)}ms max=${Math.max(...times)}ms`);
+  }
+
+  // ── 4. Race condition: concurrent cancel ──────────────────────────────────
+  console.log(`\n  ${C.dim}— 4. Race condition: 5 параллельных cancel одного appointment —${C.reset}`);
+  if (th) {
+    let sess;
+    try {
+      sess = await newSession();
+      const cr = await apiReq('POST', '/appointments/create', {
+        patient_id: sess.userId, psychologist_id: th.id, type: 'Online', scheduled_time: futureISO(), venue: 'https://meet.example.com/test',
+      }, sess.cookie);
+      const apptId = cr.json?.id;
+      if (apptId) {
+        const results = await Promise.all(
+          Array.from({ length: 5 }, () =>
+            apiReq('PUT', `/appointments/${apptId}/cancel`, { cancel_reason: 'race-test' }, sess.cookie)
+          )
+        );
+        const successes = results.filter(r => r.status === 200).length;
+        const failures  = results.filter(r => r.status !== 200).length;
+        rec('5× concurrent cancel одного appointment', 'RACE', '≤1×200 или idempotent',
+          `${successes}×200 / ${failures}×4xx`,
+          successes <= 1 ? true : null,
+          successes === 1 ? '✓ ровно 1 успех' : successes === 5 ? '⚠️ все 5 вернули 200 — idempotent cancel' : `${successes} успехов из 5`);
+      } else {
+        rec('race condition setup', 'POST', '200/201', cr.status, null, 'appointment не создан');
+      }
+    } catch (e) {
+      rec('race condition cancel', 'RACE', '≤1×200', 'ошибка', null, e.message.slice(0, 80));
+    }
+  } else {
+    rec('race condition (нет терапевтов)', 'SKIP', '—', '—', null, '');
+  }
+
+  // ── 5. Concurrent authenticated reads ─────────────────────────────────────
+  console.log(`\n  ${C.dim}— 5. 5 пользователей одновременно читают свой профиль —${C.reset}`);
+  {
+    try {
+      const sessions = await Promise.all(Array.from({ length: 5 }, () => newSession()));
+      const results  = await Promise.all(sessions.map(s => apiReq('GET', '/users/user', null, s.cookie)));
+      const ok = results.filter(r => r.status === 200);
+      const consistent = results.every((r, i) => r.json?.email === sessions[i].email);
+      rec('5× concurrent GET /api/users/user (разные сессии)', 'PARALLEL', '5×200+consistent',
+        `${ok.length}×200`,
+        ok.length === 5 && consistent,
+        consistent ? '✓ каждый получил свой профиль' : '⚠️ КРИТИЧНО: данные перемешались между сессиями!');
+    } catch (e) {
+      rec('concurrent sessions', 'PARALLEL', '5×200', 'ошибка', null, e.message.slice(0, 80));
+    }
+  }
+
+  // ── 6. Concurrent register with same email (race on duplicate) ────────────
+  console.log(`\n  ${C.dim}— 6. 5 параллельных регистраций с одним email — race на дубль —${C.reset}`);
+  {
+    const sharedEmail = testEmail();
+    const body = { first_name: 'Race', last_name: 'Email', phone_number: '+79991234567', email: sharedEmail, password: 'TestPass123!' };
+    const results = await Promise.all(Array.from({ length: 5 }, () => apiReq('POST', '/users/register', body, null)));
+    const created  = results.filter(r => r.status === 201 || r.status === 200);
+    const rejected = results.filter(r => r.status >= 400);
+    rec('5× concurrent register с одним email', 'RACE', '1×201 + 4×4xx',
+      `${created.length}×created / ${rejected.length}×rejected`,
+      created.length === 1 ? true : created.length > 1 ? false : null,
+      created.length > 1 ? `⚠️ КРИТИЧНО: создано ${created.length} аккаунтов с одним email!` : `✓ 1 создан, ${rejected.length} отклонены`);
+    results.filter(r => r.json?.id).forEach(r => trackUser(sharedEmail, r.json.id));
+  }
+
+  // ── 7. Burst login storm ──────────────────────────────────────────────────
+  console.log(`\n  ${C.dim}— 7. 15 параллельных логинов одного пользователя —${C.reset}`);
+  {
+    let sess;
+    try {
+      sess = await newSession();
+      const N = 15;
+      const results = await Promise.all(
+        Array.from({ length: N }, () => apiReq('POST', '/users/login', { email: sess.email, password: sess.pass }, null))
+      );
+      const ok   = results.filter(r => r.status === 200);
+      const fail = results.filter(r => r.status !== 200);
+      const times = results.map(r => r.ms);
+      rec(`${N}× concurrent POST /api/users/login (один пользователь)`, 'PARALLEL', `${N}×200`,
+        `${ok.length}×200 / ${fail.length}×other`,
+        ok.length === N ? true : ok.length >= N * 0.8 ? null : false,
+        `p50=${pct(times, 50)}ms  p95=${pct(times, 95)}ms${fail.length ? `  упало: ${fail.map(r => r.status).join(',')}` : ''}`);
+    } catch (e) {
+      rec('burst login storm', 'PARALLEL', '15×200', 'ошибка', null, e.message.slice(0, 80));
+    }
+  }
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  EDGE  (граничные значения и нестандартные входы)
+// ═════════════════════════════════════════════════════════════════════════════
+async function runEdge() {
+  console.log(`\n${C.bold}🔬  EDGE — граничные значения и нестандартные входы${C.reset}\n`);
+
+  async function tryReg(overrides) {
+    const base = { first_name: 'Test', last_name: 'User', phone_number: '+79991234567', email: testEmail(), password: 'TestPass123!' };
+    const r = await apiReq('POST', '/users/register', { ...base, ...overrides }, null);
+    if (r.json?.id) trackUser(overrides.email || base.email, r.json.id);
+    return r;
+  }
+
+  // ── 1. Unicode in name fields ─────────────────────────────────────────────
+  console.log(`\n  ${C.dim}— 1. Unicode в полях имени —${C.reset}`);
+  for (const [label, first_name] of [
+    ['Emoji 🧠🎯',    '🧠🎯'],
+    ['Arabic محمد',   'محمد'],
+    ['Chinese 张伟',   '张伟'],
+    ['Greek Αλέξ',    'Αλέξανδρος'],
+    ['Mixed Иван-Ivan', 'Иван-Ivan'],
+  ]) {
+    const r = await tryReg({ first_name });
+    rec(`/api/users/register (first_name: ${label})`, 'POST', '201 или 422', r.status,
+      r.status === 201 || r.status === 200 || r.status === 422,
+      r.status === 201 || r.status === 200
+        ? `⚠️ принят — проверьте отображение в UI: "${first_name}"`
+        : `отклонён (${r.status})`);
+  }
+
+  // ── 2. Boundary: name length ──────────────────────────────────────────────
+  console.log(`\n  ${C.dim}— 2. Граничные значения длины: first_name max=50 —${C.reset}`);
+  {
+    const r50 = await tryReg({ first_name: 'A'.repeat(50) });
+    rec('/api/users/register (first_name 50 chars = max)', 'POST', 201, r50.status, r50.status === 201 || r50.status === 200, 'ровно на границе — должен пройти');
+
+    const r51 = await tryReg({ first_name: 'A'.repeat(51) });
+    rec('/api/users/register (first_name 51 chars = max+1)', 'POST', 422, r51.status, r51.status === 422, 'один сверх — должен отклонить');
+
+    const r1 = await tryReg({ first_name: 'A' });
+    rec('/api/users/register (first_name 1 char = min)', 'POST', 201, r1.status, r1.status === 201 || r1.status === 200, '');
+  }
+
+  console.log(`\n  ${C.dim}— 2b. Граничные значения: last_name max=50 —${C.reset}`);
+  {
+    const r50 = await tryReg({ last_name: 'B'.repeat(50) });
+    rec('/api/users/register (last_name 50 chars)', 'POST', 201, r50.status, r50.status === 201 || r50.status === 200, '');
+
+    const r51 = await tryReg({ last_name: 'B'.repeat(51) });
+    rec('/api/users/register (last_name 51 chars = max+1)', 'POST', 422, r51.status, r51.status === 422, '');
+  }
+
+  console.log(`\n  ${C.dim}— 2c. Граничные значения: password min=8 max=64 —${C.reset}`);
+  {
+    const r7  = await tryReg({ password: 'A1!bcde' });  // 7 chars
+    rec('/api/users/register (password 7 chars = min-1)', 'POST', 422, r7.status, r7.status === 422, '');
+
+    const r8  = await tryReg({ password: 'Aa1!bcde' }); // 8 chars
+    rec('/api/users/register (password 8 chars = min)', 'POST', 201, r8.status, r8.status === 201 || r8.status === 200, '');
+
+    const r64 = await tryReg({ password: 'Aa1!' + 'x'.repeat(60) });
+    rec('/api/users/register (password 64 chars = max)', 'POST', 201, r64.status, r64.status === 201 || r64.status === 200, '');
+
+    const r65 = await tryReg({ password: 'Aa1!' + 'x'.repeat(61) });
+    rec('/api/users/register (password 65 chars = max+1)', 'POST', 422, r65.status, r65.status === 422, '');
+  }
+
+  // ── 3. Special field values ────────────────────────────────────────────────
+  console.log(`\n  ${C.dim}— 3. Специальные значения полей —${C.reset}`);
+
+  // Email with plus addressing
+  {
+    const r = await tryReg({ email: `auto+tag+${Date.now()}@mailinator.com` });
+    rec('/api/users/register (email с +тегом)', 'POST', 201, r.status, r.status === 201 || r.status === 200,
+      r.status === 201 || r.status === 200 ? 'plus-addressing принят ✓' : `отклонён: ${r.status}`);
+  }
+
+  // XSS payload in name
+  {
+    const xss = '<script>alert(1)</script>';
+    const r = await tryReg({ first_name: xss });
+    rec('/api/users/register (XSS в first_name)', 'POST', '422 или 201+warn', r.status,
+      r.status === 422 ? true : r.status === 201 || r.status === 200 ? null : false,
+      r.status === 201 || r.status === 200 ? '⚠️ XSS payload сохранён — проверьте экранирование на фронте!' : 'XSS отклонён ✓');
+  }
+
+  // null for required field
+  {
+    const r = await apiReq('POST', '/users/register', {
+      first_name: null, last_name: 'Test', phone_number: '+79991234567', email: testEmail(), password: 'TestPass123!',
+    }, null);
+    rec('/api/users/register (first_name: null)', 'POST', 422, r.status, r.status === 422,
+      JSON.stringify(r.json || {}).slice(0, 80));
+  }
+
+  // Empty string for required field
+  {
+    const r = await tryReg({ first_name: '' });
+    rec('/api/users/register (first_name: "")', 'POST', 422, r.status, r.status === 422,
+      JSON.stringify(r.json || {}).slice(0, 80));
+  }
+
+  // Whitespace-only name
+  {
+    const r = await tryReg({ first_name: '   ' });
+    rec('/api/users/register (first_name: "   " только пробелы)', 'POST', 422, r.status,
+      r.status === 422 ? true : r.status === 201 || r.status === 200 ? null : false,
+      r.status === 201 || r.status === 200 ? '⚠️ имя из пробелов принято — нужна trim-валидация' : 'отклонено ✓');
+  }
+
+  // Newlines in name
+  {
+    const r = await tryReg({ first_name: 'Иван\nПетров' });
+    rec('/api/users/register (first_name с \\n)', 'POST', '422 или 201+warn', r.status,
+      r.status === 422 ? true : r.status === 201 || r.status === 200 ? null : false,
+      r.status === 201 || r.status === 200 ? '⚠️ перенос строки принят в имени' : 'отклонено ✓');
+  }
+
+  // ── 4. Appointment edge cases ──────────────────────────────────────────────
+  console.log(`\n  ${C.dim}— 4. Граничные значения appointments —${C.reset}`);
+  const trReq = await apiReq('GET', '/therapists/', null, null);
+  const th = Array.isArray(trReq.json) ? trReq.json[0] : null;
+
+  if (th) {
+    let sess;
+    try {
+      sess = await newSession();
+
+      // javascript: URL as venue (XSS/SSRF probe)
+      {
+        const r = await apiReq('POST', '/appointments/create', {
+          patient_id: sess.userId, psychologist_id: th.id, type: 'Online', scheduled_time: futureISO(), venue: 'javascript:alert(1)',
+        }, sess.cookie);
+        rec('/api/appointments/create (venue: javascript:alert)', 'POST', '422/400', r.status,
+          r.status === 422 || r.status === 400 ? true : r.status === 200 || r.status === 201 ? null : false,
+          r.status === 200 || r.status === 201 ? `⚠️ javascript: URL принят как venue! (XSS/SSRF-риск) id=${r.json?.id?.slice(0, 8)}…` : `отклонён: ${r.status} ✓`);
+        if (r.json?.id) await apiReq('PUT', `/appointments/${r.json.id}/cancel`, { cancel_reason: 'cleanup' }, sess.cookie);
+      }
+
+      // file:// URL as venue
+      {
+        const r = await apiReq('POST', '/appointments/create', {
+          patient_id: sess.userId, psychologist_id: th.id, type: 'Online', scheduled_time: futureISO(), venue: 'file:///etc/passwd',
+        }, sess.cookie);
+        rec('/api/appointments/create (venue: file:///etc/passwd)', 'POST', '422/400', r.status,
+          r.status === 422 || r.status === 400 ? true : r.status === 200 || r.status === 201 ? null : false,
+          r.status === 200 || r.status === 201 ? '⚠️ file:// URL принят как venue!' : `отклонён: ${r.status} ✓`);
+        if (r.json?.id) await apiReq('PUT', `/appointments/${r.json.id}/cancel`, { cancel_reason: 'cleanup' }, sess.cookie);
+      }
+
+      // Empty venue for Online type
+      {
+        const r = await apiReq('POST', '/appointments/create', {
+          patient_id: sess.userId, psychologist_id: th.id, type: 'Online', scheduled_time: futureISO(), venue: '',
+        }, sess.cookie);
+        rec('/api/appointments/create (venue: "" для Online)', 'POST', '422/400', r.status,
+          r.status === 422 || r.status === 400 ? true : r.status === 200 || r.status === 201 ? null : false,
+          r.status === 200 || r.status === 201 ? '⚠️ пустой venue принят для Online-типа' : `отклонён: ${r.status} ✓`);
+        if (r.json?.id) await apiReq('PUT', `/appointments/${r.json.id}/cancel`, { cancel_reason: 'cleanup' }, sess.cookie);
+      }
+
+      // Long cancel reason (2000 chars)
+      {
+        const cr = await apiReq('POST', '/appointments/create', {
+          patient_id: sess.userId, psychologist_id: th.id, type: 'Online', scheduled_time: futureISO(), venue: 'https://meet.example.com/test',
+        }, sess.cookie);
+        if (cr.json?.id) {
+          const longReason = 'причина '.repeat(250).slice(0, 2000);
+          const r = await apiReq('PUT', `/appointments/${cr.json.id}/cancel`, { cancel_reason: longReason }, sess.cookie);
+          rec('/api/appointments/{id}/cancel (cancel_reason 2000 символов)', 'PUT', '200 или 422', r.status,
+            r.status === 200 || r.status === 422,
+            `${r.status === 200 ? 'принято' : 'отклонено'} (2000 символов)`);
+        }
+      }
+    } catch (e) {
+      rec('appointment edge cases', 'EDGE', 'ok', 'ошибка', null, e.message.slice(0, 80));
+    }
+
+    // Very long problem_description in application
+    {
+      let sess2;
+      try {
+        sess2 = await newSession();
+        const longDesc = 'Описание: '.repeat(500).slice(0, 5000);
+        const r = await apiReq('POST', '/applications/', {
+          psychologist_id:     th.id,
+          scheduled_at:        futureISO(),
+          problem_description: longDesc,
+          university_status:   'студент',
+        }, sess2.cookie);
+        rec('/api/applications/ (problem_description 5000 символов)', 'POST', '200/201 или 422', r.status,
+          r.status === 200 || r.status === 201 || r.status === 422,
+          r.status === 200 || r.status === 201 ? `принято 5000 символов (id=${r.json?.id?.slice(0, 8)}…)` : `отклонено: ${r.status}`);
+        if (r.json?.id) {
+          await apiReq('POST', `/applications/${r.json.id}/cancel`, { cancel_reason: 'cleanup', cancel_initiator: 'user' }, sess2.cookie);
+        }
+      } catch (e) {
+        rec('long problem_description', 'EDGE', '200/422', 'ошибка', null, e.message.slice(0, 80));
+      }
+    }
+  } else {
+    rec('appointment edge cases (нет терапевтов)', 'SKIP', '—', '—', null, 'пропущено');
+  }
+
+  // ── 5. HTTP method & Content-Type probes ──────────────────────────────────
+  console.log(`\n  ${C.dim}— 5. Нестандартные HTTP-методы и Content-Type —${C.reset}`);
+
+  {
+    const r = await apiReq('PATCH', '/users/me', { first_name: 'x' }, '');
+    rec('/api/users/me (PATCH вместо PUT)', 'PATCH', '404/405/401', r.status,
+      r.status === 404 || r.status === 405 || r.status === 401 || r.status === 422,
+      JSON.stringify(r.json || {}).slice(0, 60));
+  }
+  {
+    const r = await apiReq('DELETE', '/users/user', null, '');
+    rec('/api/users/user (DELETE)', 'DELETE', '404/405/401', r.status,
+      r.status === 404 || r.status === 405 || r.status === 401,
+      JSON.stringify(r.json || {}).slice(0, 60));
+  }
+
+  // Wrong Content-Type
+  {
+    try {
+      const res = await fetch(`${API}/users/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain' },
+        body: JSON.stringify({ first_name: 'Test', last_name: 'User', phone_number: '+79991234567', email: testEmail(), password: 'TestPass123!' }),
+      });
+      rec('/api/users/register (Content-Type: text/plain)', 'POST', '415/422', res.status,
+        res.status === 415 || res.status === 422 || res.status === 400,
+        res.status === 201 || res.status === 200 ? '⚠️ принят с неверным Content-Type' : `отклонён: ${res.status} ✓`);
+    } catch (e) {
+      rec('/api/users/register (text/plain Content-Type)', 'POST', '415/422', 'network err', null, e.message.slice(0, 60));
+    }
+  }
+
+  // Extra unknown fields in body
+  {
+    const r = await apiReq('POST', '/users/register', {
+      first_name: 'Test', last_name: 'User', phone_number: '+79991234567',
+      email: testEmail(), password: 'TestPass123!',
+      is_admin: true, role: 'admin', __proto__: 'polluted',
+    }, null);
+    rec('/api/users/register (лишние поля: is_admin, role)', 'POST', '201 (поля игнорированы)', r.status,
+      r.status === 201 || r.status === 200 ? true : r.status === 422 ? null : false,
+      r.status === 201 || r.status === 200
+        ? `принят — убедитесь что role/is_admin не применились`
+        : `отклонён: ${r.status}`);
+    if (r.json?.id) trackUser('edge-extra-fields', r.json.id);
+  }
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
 //  ADMIN  (только если заданы ADMIN_EMAIL + ADMIN_PASSWORD)
 // ═════════════════════════════════════════════════════════════════════════════
 async function runAdmin() {
@@ -963,6 +1595,9 @@ async function runAll() {
     ['api',          runApi],
     ['appointments', runAppointments],
     ['security',     runSecurity],
+    ['scenarios',    runScenarios],
+    ['chaos',        runChaos],
+    ['edge',         runEdge],
     ['ui',           runUi],
   ];
 
@@ -1031,6 +1666,9 @@ ${C.bold}Режимы:${C.reset}
   --ui            Playwright: страницы, навигация, кнопки, изображения
   --appointments  Запись на приём: создание, просмотр, отмена (API + UI)
   --security      401/422, maxLength, SQL-инъекции, невалидные UUID
+  --scenarios     Комплексные сценарии: изоляция данных, смена пароля, двойная отмена, rate limit
+  --chaos         Конкурентность: 10× parallel register, 20× parallel read, race condition, p95
+  --edge          Граничные значения: Unicode, boundary length, XSS, null, URL-инъекции
   --admin         Административные эндпоинты (нужны ADMIN_EMAIL + ADMIN_PASSWORD)
   --all           Полное тестирование + сводный full-report.md
 
@@ -1061,6 +1699,9 @@ const modeMap = {
   '--ui':           runUi,
   '--appointments': runAppointments,
   '--security':     runSecurity,
+  '--scenarios':    runScenarios,
+  '--chaos':        runChaos,
+  '--edge':         runEdge,
   '--admin':        runAdmin,
   '--all':          runAll,
 };
