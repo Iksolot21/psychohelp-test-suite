@@ -1114,6 +1114,21 @@ async function runScenarios() {
       rec('application isolation', 'SCENARIO', '403/404', 'ошибка', null, e.message.slice(0, 80));
     }
   }
+
+  // ── 11. Login с несуществующим email → 401, не 404 ────────────────────────
+  console.log(`\n  ${C.dim}— 11. Несуществующий email: 401 (а не 404 — user enumeration) —${C.reset}`);
+  {
+    const ghost = `nonexistent_${Date.now()}@noreply.invalid`;
+    const r = await apiReq('POST', '/users/login', { email: ghost, password: 'SomePass123!' }, null);
+    const is401 = r.status === 401;
+    const is404 = r.status === 404;
+    rec('/api/users/login (несуществующий email)', 'POST', 401, r.status,
+      is401 ? true : is404 ? false : r.status >= 400 ? null : false,
+      is404
+        ? '⚠️ SEC: 404 раскрывает что аккаунт не зарегистрирован — user enumeration!'
+        : is401 ? 'ответ 401 не раскрывает существование аккаунта ✓'
+        : `статус ${r.status} — проверьте вручную`);
+  }
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -1516,6 +1531,325 @@ async function runEdge() {
         : `отклонён: ${r.status}`);
     if (r.json?.id) trackUser('edge-extra-fields', r.json.id);
   }
+
+  // ── 6. Phone number formats ───────────────────────────────────────────────
+  console.log(`\n  ${C.dim}— 6. Форматы phone_number — что принимает сервер —${C.reset}`);
+  for (const [label, phone] of [
+    ['международный +7(999)123-45-67',  '+7(999)123-45-67'],
+    ['без плюса 89991234567',            '89991234567'],
+    ['с пробелами +7 999 123 45 67',    '+7 999 123 45 67'],
+    ['только цифры 79991234567',         '79991234567'],
+    ['короткий +7999',                   '+7999'],
+    ['иностранный +1-800-555-0100',      '+1-800-555-0100'],
+  ]) {
+    const r = await tryReg({ phone_number: phone });
+    rec(`/api/users/register (phone: ${label})`, 'POST', '201 или 422', r.status,
+      r.status === 201 || r.status === 200 || r.status === 422,
+      r.status === 201 || r.status === 200 ? `принят ✓ "${phone}"` : `отклонён (${r.status})`);
+  }
+
+  // ── 7. null vs отсутствует vs "" на PUT /users/me ────────────────────────
+  console.log(`\n  ${C.dim}— 7. null vs отсутствует vs "" в PUT /users/me — разное поведение? —${C.reset}`);
+  {
+    let sess;
+    try {
+      sess = await newSession();
+      // a) поле отсутствует
+      const rAbsent = await apiReq('PUT', '/users/me', { last_name: 'Тест' }, sess.cookie);
+      rec('/api/users/me PUT (first_name отсутствует)', 'PUT', '200 или 422', rAbsent.status,
+        rAbsent.status === 200 || rAbsent.status === 422,
+        `${rAbsent.status} — first_name не тронут?`);
+
+      // b) поле = null
+      const rNull = await apiReq('PUT', '/users/me', { first_name: null }, sess.cookie);
+      rec('/api/users/me PUT (first_name: null)', 'PUT', '422 или 200', rNull.status,
+        rNull.status === 422 ? true : rNull.status === 200 ? null : false,
+        rNull.status === 200 ? `⚠️ null принят — first_name стал null в БД?` : `отклонено: ${rNull.status} ✓`);
+
+      // c) поле = ""
+      const rEmpty = await apiReq('PUT', '/users/me', { first_name: '' }, sess.cookie);
+      rec('/api/users/me PUT (first_name: "")', 'PUT', '422 или 200', rEmpty.status,
+        rEmpty.status === 422 ? true : rEmpty.status === 200 ? null : false,
+        rEmpty.status === 200 ? '⚠️ пустая строка принята как имя' : `отклонено: ${rEmpty.status} ✓`);
+
+      // d) сравнение: убеждаемся что все три дали разный/одинаковый результат
+      const codes = [rAbsent.status, rNull.status, rEmpty.status];
+      const allSame = codes.every(c => c === codes[0]);
+      rec('/api/users/me PUT — absent/null/"" дают одинаковый результат?', 'COMPARE',
+        'фиксируем', codes.join('/'), null,
+        `absent=${rAbsent.status} | null=${rNull.status} | ""=${rEmpty.status}  ${allSame ? '(одинаково)' : '(поведение различается)'}`);
+    } catch (e) {
+      rec('PUT null vs absent vs empty', 'EDGE', 'ok', 'ошибка', null, e.message.slice(0, 80));
+    }
+  }
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  INFRA  (CORS, stack trace leak, security headers)
+// ═════════════════════════════════════════════════════════════════════════════
+async function runInfra() {
+  console.log(`\n${C.bold}🏗️   INFRA — CORS, утечки stack trace, security-заголовки${C.reset}\n`);
+
+  // ── 1. CORS ───────────────────────────────────────────────────────────────
+  console.log(`  ${C.dim}— 1. CORS: OPTIONS с Origin: http://evil.com —${C.reset}`);
+  {
+    try {
+      const res = await fetch(`${API}/therapists/`, {
+        method: 'OPTIONS',
+        headers: {
+          Origin: 'http://evil.com',
+          'Access-Control-Request-Method': 'GET',
+          'Access-Control-Request-Headers': 'Content-Type',
+        },
+      });
+      const acao  = res.headers.get('access-control-allow-origin') || '(заголовок отсутствует)';
+      const creds = res.headers.get('access-control-allow-credentials') || '(нет)';
+      const isOpen = acao === '*' || acao.toLowerCase().includes('evil.com');
+      rec('OPTIONS /api/therapists/ (Origin: evil.com)', 'OPTIONS', '!= evil.com / *', acao,
+        isOpen ? null : true,
+        isOpen
+          ? `⚠️ КРИТИЧНО: CORS открыт для произвольных Origins! ACAO="${acao}" credentials=${creds}`
+          : `ACAO="${acao}"  credentials=${creds}`);
+    } catch (e) {
+      rec('CORS probe', 'OPTIONS', 'ok', 'network err', null, e.message.slice(0, 80));
+    }
+  }
+
+  // ── 2. Stack trace leak ───────────────────────────────────────────────────
+  console.log(`\n  ${C.dim}— 2. Утечка stack trace в теле 500-ошибок —${C.reset}`);
+  {
+    const leakKw = ['Traceback', 'File "/', '/home/', '/app/', '/usr/', 'line ', 'at Object.', 'node_modules', 'SyntaxError', 'NameError'];
+    const probes = [
+      ['POST', '/users/register',    { email: null, first_name: null, last_name: null, phone_number: null, password: null }],
+      ['GET',  '/therapists/00000000-0000-0000-0000-00000000000Z', null],
+      ['POST', '/applications/',     { psychologist_id: 'not-uuid', scheduled_at: 'not-date' }],
+    ];
+    let gotAny500 = false;
+    for (const [method, urlPath, body] of probes) {
+      const r = await apiReq(method, urlPath, body, '');
+      if (r.status !== 500) continue;
+      gotAny500 = true;
+      const text = JSON.stringify(r.json || '') + (r.json ? '' : '');
+      const found = leakKw.filter(kw => text.includes(kw));
+      rec(`/api${urlPath} (500 + stack trace?)`, method, '500 без leak', `500`,
+        found.length === 0 ? true : false,
+        found.length ? `❌ КРИТИЧНО: утечка: [${found.join(', ')}] | ${text.slice(0, 100)}` : 'stack trace не обнаружен в теле ✓');
+    }
+    if (!gotAny500) {
+      rec('stack trace leak probe', 'PROBE', '500 не получен', '(нет 500)', true,
+        'ни один пробный запрос не вернул 500 — сервер устойчив к тестовым пейлоадам');
+    }
+  }
+
+  // ── 3. Security headers ───────────────────────────────────────────────────
+  console.log(`\n  ${C.dim}— 3. Security-заголовки HTTP —${C.reset}`);
+  const secHeaders = [
+    'X-Content-Type-Options',
+    'X-Frame-Options',
+    'Strict-Transport-Security',
+    'X-XSS-Protection',
+    'Content-Security-Policy',
+    'Referrer-Policy',
+  ];
+
+  for (const [endpoint, label] of [[BASE + '/', 'frontend /'], [`${API}/therapists/`, 'API /therapists/']]) {
+    let res;
+    try { res = await fetch(endpoint); }
+    catch (e) { rec(`Security headers (${label})`, 'GET', 'ok', 'network err', null, e.message.slice(0, 60)); continue; }
+    console.log(`\n  ${C.dim}  ${label}:${C.reset}`);
+    for (const header of secHeaders) {
+      const val = res.headers.get(header) || res.headers.get(header.toLowerCase());
+      if (header === 'Strict-Transport-Security' && BASE.startsWith('http:')) {
+        rec(`${header} (${label})`, 'HEADER', 'N/A (HTTP)', val || '(нет)', null, 'HSTS применим только к HTTPS');
+        continue;
+      }
+      rec(`${header} (${label})`, 'HEADER', 'присутствует', val || '(нет)',
+        val ? true : null,
+        val ? val.slice(0, 80) : '⚠️ заголовок отсутствует — рекомендуется добавить');
+    }
+  }
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  AUTHZ  (авторизационные границы — IDOR, privilege escalation)
+// ═════════════════════════════════════════════════════════════════════════════
+async function runAuthz() {
+  console.log(`\n${C.bold}🔒  AUTHZ — авторизационные границы (IDOR, privilege escalation)${C.reset}\n`);
+
+  let sessA, sessB;
+  try {
+    [sessA, sessB] = await Promise.all([newSession(), newSession()]);
+  } catch (e) {
+    rec('authz setup', 'SETUP', 'ok', 'ошибка', false, 'Не удалось создать пользователей: ' + e.message.slice(0, 60));
+    return;
+  }
+  console.log(`  user_A: ${sessA.email}  [${sessA.userId?.slice(0, 8)}…]`);
+  console.log(`  user_B: ${sessB.email}  [${sessB.userId?.slice(0, 8)}…]\n`);
+
+  const trReq = await apiReq('GET', '/therapists/', null, null);
+  const th = Array.isArray(trReq.json) ? trReq.json[0] : null;
+
+  // ── 1. user_A reads profile of user_B ─────────────────────────────────────
+  console.log(`  ${C.dim}— 1. user_A читает профиль user_B → 403/404 —${C.reset}`);
+  {
+    const r = await apiReq('GET', `/users/user/${sessB.userId}`, null, sessA.cookie);
+    rec('/api/users/user/{id_B} GET (из сессии A)', 'GET', '403/404', r.status,
+      r.status === 403 || r.status === 404 ? true : r.status === 200 ? false : null,
+      r.status === 200 ? `⚠️ КРИТИЧНО IDOR: user_A видит профиль user_B! email=${r.json?.email}` : `запрещено: ${r.status} ✓`);
+  }
+
+  // ── 2. Privilege escalation: assign self admin ────────────────────────────
+  console.log(`\n  ${C.dim}— 2. Повышение привилегий: user_A назначает себя admin —${C.reset}`);
+  {
+    const r = await apiReq('POST', `/roles/${sessA.userId}/assign`, { role_code: 'admin' }, sessA.cookie);
+    rec('/api/roles/{id}/assign (role_code: admin)', 'POST', '403/404/405', r.status,
+      r.status === 403 || r.status === 404 || r.status === 405 ? true : r.status === 200 ? false : null,
+      r.status === 200 ? '⚠️ КРИТИЧНО: user сам назначил себе роль admin!' : `запрещено: ${r.status} ✓`);
+  }
+
+  // ── 3. user_A tries to create a therapist ─────────────────────────────────
+  console.log(`\n  ${C.dim}— 3. Создание терапевта обычным пользователем → 403 —${C.reset}`);
+  {
+    const r = await apiReq('POST', '/therapists/', {
+      first_name: 'Fake', last_name: 'Therapist',
+      specialization: 'Психолог', description: 'Автотест', price: 1000,
+    }, sessA.cookie);
+    rec('/api/therapists/ POST (обычный user → 403)', 'POST', '403/401', r.status,
+      r.status === 403 || r.status === 401 || r.status === 405 ? true : r.status === 200 || r.status === 201 ? false : null,
+      r.status === 200 || r.status === 201 ? '⚠️ КРИТИЧНО: обычный user создал терапевта!' : `запрещено: ${r.status} ✓`);
+  }
+
+  // ── 4. user_B cancels appointment of user_A ───────────────────────────────
+  console.log(`\n  ${C.dim}— 4. user_B отменяет запись user_A → 403/404 —${C.reset}`);
+  if (th) {
+    const cr = await apiReq('POST', '/appointments/create', {
+      patient_id: sessA.userId, psychologist_id: th.id, type: 'Online', scheduled_time: futureISO(), venue: 'https://meet.example.com/authz',
+    }, sessA.cookie);
+    const apptId = cr.json?.id;
+    if (apptId) {
+      const r = await apiReq('PUT', `/appointments/${apptId}/cancel`, { cancel_reason: 'IDOR attack' }, sessB.cookie);
+      rec('/api/appointments/{id_A}/cancel (из сессии B)', 'PUT', '403/404', r.status,
+        r.status === 403 || r.status === 404 ? true : r.status === 200 ? false : null,
+        r.status === 200 ? '⚠️ КРИТИЧНО IDOR: user_B отменил запись user_A!' : `запрещено: ${r.status} ✓`);
+      await apiReq('PUT', `/appointments/${apptId}/cancel`, { cancel_reason: 'cleanup' }, sessA.cookie);
+    } else {
+      rec('authz step 4 setup', 'POST', '200/201', cr.status, null, 'appointment не создан — пропущено');
+    }
+  } else {
+    rec('authz step 4 (нет терапевтов)', 'SKIP', '—', '—', null, '');
+  }
+
+  // ── 5. user_A updates profile of user_B ──────────────────────────────────
+  console.log(`\n  ${C.dim}— 5. user_A обновляет профиль user_B → 403/404 —${C.reset}`);
+  {
+    const r = await apiReq('PUT', `/users/${sessB.userId}`, { first_name: 'Hijacked' }, sessA.cookie);
+    rec('/api/users/{id_B} PUT (из сессии A)', 'PUT', '403/404/405', r.status,
+      r.status === 403 || r.status === 404 || r.status === 405 ? true : r.status === 200 ? false : null,
+      r.status === 200 ? '⚠️ КРИТИЧНО IDOR: user_A изменил профиль user_B!' : `запрещено: ${r.status} ✓`);
+  }
+
+  // ── 6. user_A sees only own applications in list (no data bleed) ──────────
+  console.log(`\n  ${C.dim}— 6. Список заявок: user_A не видит заявки user_B —${C.reset}`);
+  if (th) {
+    const cr = await apiReq('POST', '/applications/', {
+      psychologist_id: th.id, scheduled_at: futureISO(),
+      problem_description: 'Заявка user_B для теста изоляции', university_status: 'студент',
+    }, sessB.cookie);
+    const applId = cr.json?.id;
+    if (applId) {
+      const listR = await apiReq('GET', '/applications/', null, sessA.cookie);
+      const found = Array.isArray(listR.json) && listR.json.some(a => a.id === applId);
+      rec('/api/applications/ LIST (user_A не видит заявки user_B)', 'GET', 'нет чужих', found ? 'найдена' : 'нет',
+        found ? false : true,
+        found ? '⚠️ КРИТИЧНО: user_A видит заявку user_B в общем списке!' : 'данные изолированы ✓');
+      await apiReq('POST', `/applications/${applId}/cancel`, { cancel_reason: 'cleanup', cancel_initiator: 'user' }, sessB.cookie);
+    } else {
+      rec('authz step 6 setup', 'POST', '200/201', cr.status, null, 'заявка не создана');
+    }
+  }
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  STABILITY  (деградация под нагрузкой, большие выборки)
+// ═════════════════════════════════════════════════════════════════════════════
+async function runStability() {
+  console.log(`\n${C.bold}📈  STABILITY — деградация, тренд времени ответа, большие выборки${C.reset}\n`);
+
+  // ── 1. Trend: 500 requests in 5 batches of 100 ────────────────────────────
+  console.log(`  ${C.dim}— 1. Тренд деградации: 500 последовательных GET /api/therapists/ —${C.reset}\n`);
+  {
+    const TOTAL = 500, BATCH = 100;
+    const batches = [];
+    let errors = 0;
+    process.stdout.write('  ');
+    for (let b = 0; b < TOTAL / BATCH; b++) {
+      const times = [];
+      for (let i = 0; i < BATCH; i++) {
+        const r = await apiReq('GET', '/therapists/', null, null);
+        times.push(r.ms);
+        if (r.status !== 200) errors++;
+      }
+      const avg = Math.round(times.reduce((a, v) => a + v, 0) / times.length);
+      batches.push(avg);
+      process.stdout.write(`${b * BATCH + 1}-${(b + 1) * BATCH}: ${avg}ms  `);
+    }
+    console.log('');
+
+    const firstAvg = batches[0];
+    const lastAvg  = batches[batches.length - 1];
+    const degradePct = firstAvg > 0 ? Math.round((lastAvg - firstAvg) / firstAvg * 100) : 0;
+    const batchStr  = batches.map((a, i) => `[${i * BATCH + 1}-${(i + 1) * BATCH}]: ${a}ms`).join('  ');
+
+    rec('500× GET /api/therapists/ — деградация', 'LOAD',
+      '<50% от 1-го батча', `${degradePct > 0 ? '+' : ''}${degradePct}%`,
+      degradePct <= 50 && errors === 0 ? true : degradePct <= 50 ? null : null,
+      `${batchStr}${errors ? `  ⚠️ non-200: ${errors}` : ''}`);
+
+    if (degradePct > 50) {
+      rec('тренд деградации', 'PERF', '<50%', `+${degradePct}%`, null,
+        `⚠️ батч 401-500 (${lastAvg}ms) медленнее батча 1-100 (${firstAvg}ms) на ${degradePct}%`);
+    }
+  }
+
+  // ── 2. Large take: ?take=10000 ────────────────────────────────────────────
+  console.log(`\n  ${C.dim}— 2. Большие выборки: ?take=10000 —${C.reset}`);
+  for (const [urlPath, label] of [
+    ['/therapists/?take=10000',   'therapists'],
+    ['/articles/?take=10000',     'articles'],
+    ['/news/?take=10000',         'news'],
+  ]) {
+    const r = await apiReq('GET', urlPath, null, null);
+    const count = Array.isArray(r.json) ? r.json.length : '?';
+    rec(`/api${urlPath}`, 'GET', '200 или 422', r.status, r.status === 200 || r.status === 422,
+      `${r.ms}ms | ${count} записей${r.status === 422 ? ' (take лимитирован)' : ''}${r.ms > 3000 ? ' ⚠️ >3s' : ''}`);
+    if (r.ms > 3000) {
+      rec(`/api${urlPath} (время)`, 'PERF', '<3000ms', `${r.ms}ms`, null, `⚠️ большая выборка ${label} обрабатывается медленно`);
+    }
+  }
+
+  // ── 3. Read/write interleave: 50 pairs ────────────────────────────────────
+  console.log(`\n  ${C.dim}— 3. Чередование read+auth: 50 пар GET /therapists/ + GET /users/user —${C.reset}`);
+  {
+    let sess, errors = 0;
+    try {
+      sess = await newSession();
+      const times = [];
+      for (let i = 0; i < 50; i++) {
+        const t0 = Date.now();
+        await apiReq('GET', '/therapists/', null, null);
+        const me = await apiReq('GET', '/users/user', null, sess.cookie);
+        if (me.status !== 200) errors++;
+        times.push(Date.now() - t0);
+      }
+      const avg = Math.round(times.reduce((a, b) => a + b, 0) / times.length);
+      const max = Math.max(...times);
+      rec('50× (GET /therapists/ + GET /users/user)', 'LOAD', `avg<${SLOW_MS * 2}ms`, `avg=${avg}ms`,
+        avg < SLOW_MS * 2,
+        `avg=${avg}ms  max=${max}ms${errors ? `  ⚠️ auth errors=${errors}` : '  без ошибок ✓'}`);
+    } catch (e) {
+      rec('read/write interleave', 'LOAD', 'ok', 'ошибка', null, e.message.slice(0, 80));
+    }
+  }
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -1598,6 +1932,9 @@ async function runAll() {
     ['scenarios',    runScenarios],
     ['chaos',        runChaos],
     ['edge',         runEdge],
+    ['infra',        runInfra],
+    ['authz',        runAuthz],
+    ['stability',    runStability],
     ['ui',           runUi],
   ];
 
@@ -1666,9 +2003,12 @@ ${C.bold}Режимы:${C.reset}
   --ui            Playwright: страницы, навигация, кнопки, изображения
   --appointments  Запись на приём: создание, просмотр, отмена (API + UI)
   --security      401/422, maxLength, SQL-инъекции, невалидные UUID
-  --scenarios     Комплексные сценарии: изоляция данных, смена пароля, двойная отмена, rate limit
-  --chaos         Конкурентность: 10× parallel register, 20× parallel read, race condition, p95
-  --edge          Граничные значения: Unicode, boundary length, XSS, null, URL-инъекции
+  --scenarios     Поведенческие сценарии: изоляция, двойная отмена, rate limit, user enumeration
+  --chaos         Конкурентность: 10× parallel register, race condition на cancel, p50/p95
+  --edge          Граничные значения: Unicode, XSS, null/empty/absent, phone formats, URL-инъекции
+  --infra         CORS, stack trace leak, security-заголовки (X-Frame-Options, CSP и др.)
+  --authz         IDOR и privilege escalation: изоляция профилей, назначение ролей, create therapist
+  --stability     Тренд деградации (500 запросов), большие выборки take=10000
   --admin         Административные эндпоинты (нужны ADMIN_EMAIL + ADMIN_PASSWORD)
   --all           Полное тестирование + сводный full-report.md
 
@@ -1702,6 +2042,9 @@ const modeMap = {
   '--scenarios':    runScenarios,
   '--chaos':        runChaos,
   '--edge':         runEdge,
+  '--infra':        runInfra,
+  '--authz':        runAuthz,
+  '--stability':    runStability,
   '--admin':        runAdmin,
   '--all':          runAll,
 };
