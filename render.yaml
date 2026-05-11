@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: psychohelp-test-suite
+    runtime: docker
+    plan: starter
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /healthz
+    disk:
+      name: runs
+      mountPath: /app/runs
+      sizeGB: 10
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: RUNS_DIR
+        value: /app/runs
+      - key: BASE_URL
+        value: http://95.31.169.106
+      - key: SLOW_MS
+        value: 2000
+      - key: DASHBOARD_TOKEN
+        generateValue: true

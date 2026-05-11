@@ -8,11 +8,26 @@ npm run web
 
 По умолчанию сервер открывается на `http://127.0.0.1:3000`.
 
-## GitHub Pages
+## Production hosting
 
-В репозитории есть workflow `.github/workflows/pages.yml`, который публикует статическую оболочку из `public/` на GitHub Pages.
+GitHub Pages для этого дашборда не подходит: он умеет отдавать только статические файлы и не запускает Node.js-сервер.
 
-Важно: GitHub Pages не запускает Node.js-сервер. Кнопки запуска тестов, live-лог и история прогонов работают только при `npm run web` или на отдельном backend-хостинге.
+Для полноценной работы нужен backend-хостинг с Docker/Node.js. В репозитории есть:
+
+- `Dockerfile` на официальном Playwright-образе;
+- `render.yaml` для Render Blueprint;
+- healthcheck `/healthz`;
+- поддержка `$PORT` для PaaS-платформ;
+- `RUNS_DIR=/app/runs` для истории запусков.
+
+Минимальный вариант на Render:
+
+1. New → Blueprint.
+2. Выбрать репозиторий `Iksolot21/psychohelp-test-suite`.
+3. Render подхватит `render.yaml`.
+4. После создания сервиса открыть сгенерированный `DASHBOARD_TOKEN` в Environment и использовать его при входе в дашборд.
+
+Для сохранения истории запусков между рестартами нужен persistent disk, смонтированный в `/app/runs`.
 
 ## Что доступно
 

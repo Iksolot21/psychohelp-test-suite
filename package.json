@@ -7,6 +7,7 @@
     "node": ">=18"
   },
   "scripts": {
+    "start": "node server.js",
     "smoke": "node test-suite.js --smoke",
     "auth": "node test-suite.js --auth",
     "api": "node test-suite.js --api",

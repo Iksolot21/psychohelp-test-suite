@@ -7,8 +7,10 @@ const path      = require('path');
 const crypto    = require('crypto');
 
 const app             = express();
-const PORT            = process.env.WEB_PORT          || 3000;
-const RUNS_DIR        = path.join(__dirname, 'runs');
+const PORT            = process.env.PORT || process.env.WEB_PORT || 3000;
+const RUNS_DIR        = process.env.RUNS_DIR
+  ? path.resolve(process.env.RUNS_DIR)
+  : path.join(__dirname, 'runs');
 const DASHBOARD_TOKEN = process.env.DASHBOARD_TOKEN   || '';
 const TG_TOKEN        = process.env.TELEGRAM_BOT_TOKEN || '';
 const TG_CHAT         = process.env.TELEGRAM_CHAT_ID   || '';
@@ -16,6 +18,8 @@ const TG_CHAT         = process.env.TELEGRAM_CHAT_ID   || '';
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 fs.mkdirSync(RUNS_DIR, { recursive: true });
+
+app.get('/healthz', (_req, res) => res.status(200).json({ ok: true }));
 
 // ─── Auth middleware ──────────────────────────────────────────────────────────
 app.use('/api', (req, res, next) => {
