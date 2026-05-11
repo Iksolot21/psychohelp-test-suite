@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Psychohelp Test Center</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <h1>Psychohelp Test Center</h1>
+      <p>Локальная панель запуска и анализа тест-сьюта</p>
+    </div>
+    <div class="server-strip" aria-label="Параметры сервера">
+      <span id="serverBase">BASE_URL</span>
+      <span id="serverNode">Node.js</span>
+    </div>
+  </header>
+
+  <main class="workspace">
+    <section class="panel run-panel">
+      <div class="panel-head">
+        <div>
+          <h2>Запуск</h2>
+          <p id="modeDescription">Режим не выбран</p>
+        </div>
+      </div>
+
+      <form id="runForm" class="run-form">
+        <label class="field">
+          <span>Режим</span>
+          <select id="modeSelect" name="mode"></select>
+        </label>
+
+        <div class="split-fields">
+          <label class="field">
+            <span>BASE_URL</span>
+            <input id="baseUrl" name="baseUrl" type="url" autocomplete="url" required>
+          </label>
+          <label class="field short-field">
+            <span>SLOW_MS</span>
+            <input id="slowMs" name="slowMs" type="number" min="50" max="120000" step="50" required>
+          </label>
+        </div>
+
+        <details id="adminDetails" class="admin-box">
+          <summary>ADMIN credentials</summary>
+          <div class="split-fields">
+            <label class="field">
+              <span>Email</span>
+              <input id="adminEmail" name="adminEmail" type="email" autocomplete="username">
+            </label>
+            <label class="field">
+              <span>Password</span>
+              <input id="adminPassword" name="adminPassword" type="password" autocomplete="current-password">
+            </label>
+          </div>
+        </details>
+
+        <div class="toggles" role="group" aria-label="Флаги вывода">
+          <label class="toggle">
+            <input id="quiet" name="quiet" type="checkbox">
+            <span>Quiet</span>
+          </label>
+          <label class="toggle">
+            <input id="verbose" name="verbose" type="checkbox">
+            <span>Verbose</span>
+          </label>
+        </div>
+
+        <div class="action-row">
+          <button id="runBtn" class="primary" type="submit">Запустить</button>
+          <button id="stopBtn" class="danger" type="button" disabled>Остановить</button>
+        </div>
+      </form>
+    </section>
+
+    <section class="panel job-panel">
+      <div class="panel-head compact">
+        <div>
+          <h2>Текущий прогон</h2>
+          <p id="jobSubtitle">Нет активного запуска</p>
+        </div>
+        <span id="jobStatus" class="status idle">Ожидание</span>
+      </div>
+
+      <div class="metrics" id="jobMetrics">
+        <span class="metric neutral">Всего: 0</span>
+        <span class="metric pass">Pass: 0</span>
+        <span class="metric fail">Fail: 0</span>
+        <span class="metric warn">Warn: 0</span>
+      </div>
+
+      <pre id="logOutput" class="log-output" aria-live="polite"></pre>
+    </section>
+
+    <section class="panel reports-panel">
+      <div class="panel-head">
+        <div>
+          <h2>Отчеты</h2>
+          <p id="reportsSubtitle">История запусков</p>
+        </div>
+        <button id="refreshReports" class="secondary" type="button">Обновить</button>
+      </div>
+
+      <div class="table-wrap">
+        <table class="reports-table">
+          <thead>
+            <tr>
+              <th>Файл</th>
+              <th>Итог</th>
+              <th>Дата</th>
+              <th>Размер</th>
+              <th>Действия</th>
+            </tr>
+          </thead>
+          <tbody id="reportsBody">
+            <tr><td colspan="5" class="empty-cell">Отчетов пока нет</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel report-panel">
+      <div class="panel-head report-head">
+        <div>
+          <h2 id="reportTitle">Анализ отчета</h2>
+          <p id="reportSubtitle">Выберите отчет из истории</p>
+        </div>
+        <a id="downloadReport" class="secondary link-button disabled" href="#" aria-disabled="true">Скачать</a>
+      </div>
+
+      <div id="reportSummary" class="metrics report-metrics">
+        <span class="metric neutral">Всего: 0</span>
+        <span class="metric pass">Pass: 0</span>
+        <span class="metric fail">Fail: 0</span>
+        <span class="metric warn">Warn: 0</span>
+      </div>
+
+      <div class="report-tools">
+        <div class="segments" role="group" aria-label="Фильтр результата">
+          <button class="segment active" type="button" data-status="all">Все</button>
+          <button class="segment" type="button" data-status="fail">Fail</button>
+          <button class="segment" type="button" data-status="warn">Warn</button>
+          <button class="segment" type="button" data-status="pass">Pass</button>
+        </div>
+        <input id="reportSearch" class="search" type="search" placeholder="Поиск по endpoint, методу, деталям">
+      </div>
+
+      <div id="issuesList" class="issues-list"></div>
+
+      <div class="table-wrap report-table-wrap">
+        <table class="checks-table">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Рез</th>
+              <th>Метод</th>
+              <th>Endpoint</th>
+              <th>Ожид</th>
+              <th>Факт</th>
+              <th>Детали</th>
+            </tr>
+          </thead>
+          <tbody id="checksBody">
+            <tr><td colspan="7" class="empty-cell">Нет данных</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <details class="raw-box">
+        <summary>Markdown</summary>
+        <pre id="rawReport" class="raw-report"></pre>
+      </details>
+    </section>
+  </main>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script src="/app.js"></script>
+</body>
+</html>

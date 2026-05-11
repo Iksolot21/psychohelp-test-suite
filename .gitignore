@@ -8,6 +8,8 @@ node_modules/
 report-*.md
 report-*.json
 full-report-*.md
+reports/*.md
+reports/*.json
 
 # old exploratory scripts (not part of main suite)
 booking-test.js
@@ -28,6 +30,7 @@ report.md
 Thumbs.db
 
 # editors
+.claude/
 .vscode/
 .idea/
 *.swp
@@ -36,3 +39,6 @@ Thumbs.db
 # env
 .env
 .env.local
+
+# web dashboard: run history (auto-generated)
+runs/

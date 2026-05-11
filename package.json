@@ -7,14 +7,15 @@
     "node": ">=18"
   },
   "scripts": {
-    "smoke":        "node test-suite.js --smoke",
-    "auth":         "node test-suite.js --auth",
-    "api":          "node test-suite.js --api",
-    "ui":           "node test-suite.js --ui",
+    "smoke": "node test-suite.js --smoke",
+    "auth": "node test-suite.js --auth",
+    "api": "node test-suite.js --api",
+    "ui": "node test-suite.js --ui",
     "appointments": "node test-suite.js --appointments",
-    "security":     "node test-suite.js --security",
-    "test":         "node test-suite.js --all",
-    "help":         "node test-suite.js --help"
+    "security": "node test-suite.js --security",
+    "test": "node test-suite.js --all",
+    "web": "node server.js",
+    "help": "node test-suite.js --help"
   },
   "keywords": [
     "playwright",
@@ -26,6 +27,7 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
+    "express": "^4.22.1",
     "playwright": "^1.52.0"
   }
 }

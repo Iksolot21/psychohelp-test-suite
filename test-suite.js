@@ -1,4 +1,4 @@
-'use strict';
+﻿'use strict';
 
 // ─── requires ────────────────────────────────────────────────────────────────
 const { chromium } = require('playwright');
@@ -17,6 +17,9 @@ const SLOW_MS = parseInt(process.env.SLOW_MS || '2000', 10);
 const ADMIN_EMAIL    = process.env.ADMIN_EMAIL    || '';
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '';
 const TS      = new Date().toISOString().slice(0, 16).replace('T', '_').replace(/:/g, '-');
+const REPORT_DIR = process.env.REPORT_DIR
+  ? path.resolve(__dirname, process.env.REPORT_DIR)
+  : __dirname;
 
 // ─── flags ───────────────────────────────────────────────────────────────────
 const args    = process.argv.slice(2);
@@ -91,6 +94,7 @@ function rec(endpoint, method, expected, actual, ok, details = '') {
   else                   R.warn++;
   R.rows.push({
     icon,
+    status:   ok === true ? 'pass' : ok === false ? 'fail' : 'warn',
     endpoint: String(endpoint),
     method:   String(method),
     expected: String(expected),
@@ -172,9 +176,10 @@ function saveReport(label, snap) {
     `| # | Рез | Метод | Эндпоинт | Ожид | Факт | Детали |\n` +
     `|---|---|---|---|---|---|---|\n`;
   const rows  = snap.rows.map((r, i) =>
-    `| ${i + 1} | ${r.icon} | \`${r.method}\` | ${r.endpoint} | ${r.expected} | ${r.actual} | ${r.details.slice(0, 150)} |`
+    `| ${i + 1} | ${r.icon} | \`${r.method}\` | ${r.endpoint} | ${r.expected} | ${r.actual} | ${r.details} |`
   ).join('\n');
-  const fname = path.join(__dirname, `report-${clean}-${TS}.md`);
+  fs.mkdirSync(REPORT_DIR, { recursive: true });
+  const fname = path.join(REPORT_DIR, `report-${clean}-${TS}.md`);
   fs.writeFileSync(fname, header + rows + '\n', 'utf8');
   console.log(`\n${C.cyan}📄 Отчёт: ${fname}${C.reset}`);
   return fname;
@@ -189,6 +194,39 @@ function printSummary() {
     `Итог: ${C.green}✅ ${R.pass}${C.reset} | ${failPart}❌ ${R.fail}${C.reset} | ${warnPart}⚠️ ${R.warn}${C.reset}  (всего: ${total})`
   );
   console.log(`${C.dim}${'─'.repeat(65)}${C.reset}\n`);
+}
+
+// ─── structured results ───────────────────────────────────────────────────────
+function saveStructuredResults(sections) {
+  const total = sections.reduce(
+    (a, s) => ({ pass: a.pass + s.pass, fail: a.fail + s.fail, warn: a.warn + s.warn }),
+    { pass: 0, fail: 0, warn: 0 }
+  );
+  const data = {
+    mode:      (modeArg || '').replace(/^--/, '') || 'unknown',
+    startedAt: TS,
+    baseUrl:   BASE,
+    sections:  sections.map(s => ({
+      name: s.name,
+      pass: s.pass,
+      fail: s.fail,
+      warn: s.warn,
+      rows: (s.rows || []).map(r => ({
+        status:   r.status || (r.icon === '✅' ? 'pass' : r.icon === '❌' ? 'fail' : 'warn'),
+        method:   r.method,
+        endpoint: r.endpoint,
+        expected: r.expected,
+        actual:   r.actual,
+        details:  r.details,
+      })),
+    })),
+    total,
+    createdUsers,
+  };
+  try {
+    fs.mkdirSync(REPORT_DIR, { recursive: true });
+    fs.writeFileSync(path.join(REPORT_DIR, 'results.json'), JSON.stringify(data, null, 2), 'utf8');
+  } catch (_) {}
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -217,7 +255,7 @@ async function runSmoke() {
     const r = await apiReq('GET', p, null, null);
     const ok = r.status === 200 && chk(r.json);
     rec(`/api${p}`, 'GET', exp, r.status, ok,
-      Array.isArray(r.json) ? `${r.json.length} элем.` : JSON.stringify(r.json || {}).slice(0, 60));
+      Array.isArray(r.json) ? `${r.json.length} элем.` : JSON.stringify(r.json || {}));
     recPerf(`/api${p}`, r.ms);
   }
 
@@ -227,7 +265,7 @@ async function runSmoke() {
     email: testEmail(), password: 'TestPass123!',
   }, null);
   rec('/api/users/register', 'POST', 201, rr.status, rr.status === 201,
-    rr.json?.id ? `id=${rr.json.id.slice(0, 8)}…` : JSON.stringify(rr.json || {}).slice(0, 60));
+    rr.json?.id ? `id=${rr.json.id.slice(0, 8)}…` : JSON.stringify(rr.json || {}));
   if (rr.json?.id) trackUser('smoke-user', rr.json.id);
 
   // logout (может вернуть 200 или 401 если сессии нет)
@@ -257,7 +295,7 @@ async function runAuth() {
     const schemaOk = errs.length === 0;
     rec('/api/users/register', 'POST', 201, r.status,
       r.status === 201 && (schemaOk || errs.length > 0 ? (r.status === 201 ? true : false) : false),
-      userId ? `id=${userId.slice(0, 8)}…${errs.length ? ' схема:' + errs.join(',') : ''}` : JSON.stringify(r.json || {}).slice(0, 100));
+      userId ? `id=${userId.slice(0, 8)}…${errs.length ? ' схема:' + errs.join(',') : ''}` : JSON.stringify(r.json || {}));
     recPerf('/api/users/register', r.ms);
   }
 
@@ -278,7 +316,7 @@ async function runAuth() {
   {
     const r = await apiReq('GET', '/users/user', null, '');
     rec('/api/users/user (после logout → 401)', 'GET', 401, r.status, r.status === 401,
-      JSON.stringify(r.json || {}).slice(0, 80));
+      JSON.stringify(r.json || {}));
   }
 
   // 5. Логин
@@ -286,7 +324,7 @@ async function runAuth() {
     const r = await apiReq('POST', '/users/login', { email, password: pass }, null);
     cookie = r.cookie || cookie;
     rec('/api/users/login', 'POST', 200, r.status, r.status === 200,
-      r.json?.id ? `id=${r.json.id.slice(0, 8)}…` : JSON.stringify(r.json || {}).slice(0, 80));
+      r.json?.id ? `id=${r.json.id.slice(0, 8)}…` : JSON.stringify(r.json || {}));
     recPerf('/api/users/login', r.ms);
   }
 
@@ -295,14 +333,14 @@ async function runAuth() {
     const r = await apiReq('POST', '/users/refresh', null, cookie);
     if (r.cookie) cookie = r.cookie;
     rec('/api/users/refresh', 'POST', '200/401', r.status, r.status === 200 || r.status === 401,
-      JSON.stringify(r.json || {}).slice(0, 60));
+      JSON.stringify(r.json || {}));
   }
 
   // 7. Обновление профиля
   {
     const r = await apiReq('PUT', '/users/me', { first_name: 'Обновлён', last_name: 'Профиль' }, cookie);
     rec('/api/users/me', 'PUT', 200, r.status, r.status === 200,
-      r.json?.first_name || JSON.stringify(r.json || {}).slice(0, 80));
+      r.json?.first_name || JSON.stringify(r.json || {}));
   }
 
   // 8. Смена пароля
@@ -310,7 +348,7 @@ async function runAuth() {
   {
     const r = await apiReq('POST', '/users/me/password', { old_password: pass, new_password: newPass }, cookie);
     const ok = r.status === 200;
-    rec('/api/users/me/password', 'POST', 200, r.status, ok, JSON.stringify(r.json || {}).slice(0, 80));
+    rec('/api/users/me/password', 'POST', 200, r.status, ok, JSON.stringify(r.json || {}));
     if (ok) pass = newPass;
   }
 
@@ -318,14 +356,14 @@ async function runAuth() {
   {
     const r = await apiReq('POST', '/users/password-reset/request', { email }, null);
     rec('/api/users/password-reset/request', 'POST', 200, r.status, r.status === 200,
-      JSON.stringify(r.json || {}).slice(0, 80));
+      JSON.stringify(r.json || {}));
   }
 
   // 10. Неверный пароль → 401/400/403
   {
     const r = await apiReq('POST', '/users/login', { email, password: 'WrongPass000!' }, null);
     rec('/api/users/login (неверный пароль)', 'POST', '4xx', r.status,
-      r.status === 401 || r.status === 400 || r.status === 403, JSON.stringify(r.json || {}).slice(0, 80));
+      r.status === 401 || r.status === 400 || r.status === 403, JSON.stringify(r.json || {}));
   }
 
   // 11. Дублирующий email
@@ -334,14 +372,14 @@ async function runAuth() {
       first_name: 'Д', last_name: 'Д', phone_number: '+79999999999', email, password: 'TestPass123!',
     }, null);
     rec('/api/users/register (дубль email → 4xx)', 'POST', '4xx', r.status,
-      r.status >= 400, JSON.stringify(r.json || {}).slice(0, 100));
+      r.status >= 400, JSON.stringify(r.json || {}));
   }
 
   // 12. Логин только с email (без пароля)
   {
     const r = await apiReq('POST', '/users/login', { email }, null);
     rec('/api/users/login (без пароля → 422)', 'POST', 422, r.status, r.status === 422,
-      JSON.stringify(r.json || {}).slice(0, 80));
+      JSON.stringify(r.json || {}));
   }
 }
 
@@ -366,7 +404,7 @@ async function runApi() {
     const r = await apiReq('GET', p, null, null);
     const ok = r.status === 200 && chk(r.json);
     rec(`/api${p}`, 'GET', 200, r.status, ok,
-      Array.isArray(r.json) ? `${r.json.length} элем.` : JSON.stringify(r.json || {}).slice(0, 60));
+      Array.isArray(r.json) ? `${r.json.length} элем.` : JSON.stringify(r.json || {}));
     recPerf(`/api${p}`, r.ms);
   }
 
@@ -389,7 +427,7 @@ async function runApi() {
   {
     const r = await apiReq('GET', '/therapists/00000000-0000-0000-0000-000000000000', null, null);
     rec('/api/therapists/несуществующий-UUID', 'GET', '404/422', r.status,
-      r.status === 404 || r.status === 422 || r.status === 200, JSON.stringify(r.json || {}).slice(0, 80));
+      r.status === 404 || r.status === 422 || r.status === 200, JSON.stringify(r.json || {}));
   }
 
   // articles/{id}
@@ -433,7 +471,7 @@ async function runApi() {
     // take=200 может вернуть 422 (если max=100) или 200 с урезанным списком
     rec('/api/therapists/?take=200 (лимит)', 'GET', '422/200', r4.status,
       r4.status === 422 || r4.status === 200,
-      Array.isArray(r4.json) ? `${r4.json.length} элем.` : JSON.stringify(r4.json || {}).slice(0, 60));
+      Array.isArray(r4.json) ? `${r4.json.length} элем.` : JSON.stringify(r4.json || {}));
   }
 
   // articles pagination
@@ -453,7 +491,7 @@ async function runApi() {
     const r = await apiReq('GET', '/applications/?skip=0&limit=5&sort_by=created_at&sort_desc=true', null, cookie);
     rec('/api/applications/?limit=5&sort', 'GET', '200', r.status,
       r.status === 200 || r.status === 422,
-      Array.isArray(r.json) ? `${r.json.length} элем.` : JSON.stringify(r.json || {}).slice(0, 60));
+      Array.isArray(r.json) ? `${r.json.length} элем.` : JSON.stringify(r.json || {}));
   }
 
   // ── авторизованные GET ────────────────────────────────────────────────────
@@ -465,7 +503,7 @@ async function runApi() {
   ]) {
     const r = await apiReq('GET', p, null, cookie);
     rec(`/api${p}`, 'GET', 200, r.status, r.status === 200 && chk(r.json),
-      JSON.stringify(r.json || {}).slice(0, 60));
+      JSON.stringify(r.json || {}));
     recPerf(`/api${p}`, r.ms);
   }
 
@@ -484,7 +522,7 @@ async function runApi() {
     apptId = r.json?.id || null;
     const ok = r.status === 200 || r.status === 201;
     rec('/api/appointments/create', 'POST', '200/201', r.status, ok,
-      ok ? `id=${apptId?.slice(0, 8)}…` : JSON.stringify(r.json || {}).slice(0, 120));
+      ok ? `id=${apptId?.slice(0, 8)}…` : JSON.stringify(r.json || {}));
     recPerf('/api/appointments/create', r.ms);
 
     if (apptId) {
@@ -493,7 +531,7 @@ async function runApi() {
 
       const cr = await apiReq('PUT', `/appointments/${apptId}/cancel`, { cancel_reason: 'автотест' }, cookie);
       rec('/api/appointments/{id}/cancel', 'PUT', 200, cr.status, cr.status === 200,
-        JSON.stringify(cr.json || {}).slice(0, 60));
+        JSON.stringify(cr.json || {}));
 
       const sr = await apiReq('GET', `/appointments/${apptId}`, null, cookie);
       rec('/api/appointments/{id} (статус = cancelled)', 'GET', '200+cancelled', sr.status,
@@ -515,7 +553,7 @@ async function runApi() {
     applId = r.json?.id || null;
     const ok = r.status === 200 || r.status === 201;
     rec('/api/applications/ (создать)', 'POST', '200/201', r.status, ok,
-      ok ? `id=${applId?.slice(0, 8)}…` : JSON.stringify(r.json || {}).slice(0, 120));
+      ok ? `id=${applId?.slice(0, 8)}…` : JSON.stringify(r.json || {}));
 
     if (applId) {
       const gr = await apiReq('GET', `/applications/${applId}`, null, cookie);
@@ -524,7 +562,7 @@ async function runApi() {
       const cr = await apiReq('POST', `/applications/${applId}/cancel`,
         { cancel_reason: 'автотест', cancel_initiator: 'user' }, cookie);
       rec('/api/applications/{id}/cancel', 'POST', 200, cr.status, cr.status === 200,
-        JSON.stringify(cr.json || {}).slice(0, 60));
+        JSON.stringify(cr.json || {}));
     }
   }
 
@@ -543,7 +581,7 @@ async function runApi() {
     const r = await apiReq(m, p, b, '');
     const ok = strict ? r.status === 401 : (r.status === 401 ? true : r.status === 422 ? null : false);
     rec(`/api${p} (без токена)`, m, strict ? 401 : '401', r.status, ok,
-      r.status !== 401 && !strict ? `⚠️ валидирует тело до auth-check: вернул ${r.status}` : JSON.stringify(r.json || {}).slice(0, 60));
+      r.status !== 401 && !strict ? `⚠️ валидирует тело до auth-check: вернул ${r.status}` : JSON.stringify(r.json || {}));
   }
 }
 
@@ -574,7 +612,7 @@ async function runAppointments() {
     apptId = r.json?.id || null;
     const ok = r.status === 200 || r.status === 201;
     rec('/api/appointments/create', 'POST', '200/201', r.status, ok,
-      ok ? `id=${apptId?.slice(0, 8)}…` : JSON.stringify(r.json || {}).slice(0, 140));
+      ok ? `id=${apptId?.slice(0, 8)}…` : JSON.stringify(r.json || {}));
     recPerf('/api/appointments/create', r.ms);
   }
 
@@ -592,7 +630,7 @@ async function runAppointments() {
     {
       const r = await apiReq('PUT', `/appointments/${apptId}/cancel`, { cancel_reason: 'Автотест — отмена' }, cookie);
       rec('/api/appointments/{id}/cancel', 'PUT', 200, r.status, r.status === 200,
-        JSON.stringify(r.json || {}).slice(0, 80));
+        JSON.stringify(r.json || {}));
     }
     {
       const r = await apiReq('GET', `/appointments/${apptId}`, null, cookie);
@@ -615,7 +653,7 @@ async function runAppointments() {
     applId = r.json?.id || null;
     const ok = r.status === 200 || r.status === 201;
     rec('/api/applications/ (заявка)', 'POST', '200/201', r.status, ok,
-      ok ? `id=${applId?.slice(0, 8)}… | статус=${r.json?.status}` : JSON.stringify(r.json || {}).slice(0, 140));
+      ok ? `id=${applId?.slice(0, 8)}… | статус=${r.json?.status}` : JSON.stringify(r.json || {}));
     recPerf('/api/applications/', r.ms);
   }
 
@@ -628,7 +666,7 @@ async function runAppointments() {
       const r = await apiReq('POST', `/applications/${applId}/cancel`,
         { cancel_reason: 'Автотест — отмена заявки', cancel_initiator: 'user' }, cookie);
       rec('/api/applications/{id}/cancel', 'POST', 200, r.status, r.status === 200,
-        JSON.stringify(r.json || {}).slice(0, 80));
+        JSON.stringify(r.json || {}));
     }
   }
 
@@ -665,7 +703,7 @@ async function runAppointments() {
     await browser.close();
   } catch (e) {
     if (browser) await browser.close().catch(() => {});
-    rec('UI — Playwright', 'UI', 'ok', 'ошибка', false, e.message.slice(0, 100));
+    rec('UI — Playwright', 'UI', 'ok', 'ошибка', false, e.message);
   }
 }
 
@@ -687,7 +725,7 @@ async function runSecurity() {
   ]) {
     const r = await apiReq(m, p, b, '');
     rec(`/api${p} (без токена)`, m, 401, r.status, r.status === 401,
-      JSON.stringify(r.json || {}).slice(0, 60));
+      JSON.stringify(r.json || {}));
   }
   // Эти валидируют тело до проверки авторизации — баг безопасности
   for (const [m, p, b, note] of [
@@ -714,7 +752,7 @@ async function runSecurity() {
   for (const [m, p, b, label] of invalidCases) {
     const r = await apiReq(m, p, b, '');
     rec(`/api${p} (${label})`, m, 422, r.status, r.status === 422,
-      JSON.stringify(r.json || {}).slice(0, 100));
+      JSON.stringify(r.json || {}));
   }
 
   // 3. Превышение maxLength
@@ -725,19 +763,19 @@ async function runSecurity() {
       first_name: long300, last_name: 'T', phone_number: '+79991234567', email: testEmail(), password: 'TestPass123!',
     }, null);
     rec('/api/users/register (first_name 300 chars, max=50)', 'POST', 422, r.status, r.status === 422,
-      JSON.stringify(r.json || {}).slice(0, 100));
+      JSON.stringify(r.json || {}));
   }
   {
     const r = await apiReq('POST', '/users/login', { email: testEmail(), password: long300 }, null);
     rec('/api/users/login (password 300 chars, max=64)', 'POST', 422, r.status, r.status === 422,
-      JSON.stringify(r.json || {}).slice(0, 100));
+      JSON.stringify(r.json || {}));
   }
   {
     const r = await apiReq('POST', '/users/register', {
       first_name: 'X', last_name: long300, phone_number: '+79991234568', email: testEmail(), password: 'TestPass123!',
     }, null);
     rec('/api/users/register (last_name 300 chars, max=50)', 'POST', 422, r.status, r.status === 422,
-      JSON.stringify(r.json || {}).slice(0, 100));
+      JSON.stringify(r.json || {}));
   }
 
   // 4. SQL-инъекции
@@ -750,7 +788,7 @@ async function runSecurity() {
   ]) {
     const r = await apiReq('POST', '/users/login', { email: payload, password: payload }, null);
     rec(`/api/users/login (SQLi: ${payload.slice(0, 22)}…)`, 'POST', '4xx', r.status,
-      r.status >= 400, JSON.stringify(r.json || {}).slice(0, 80));
+      r.status >= 400, JSON.stringify(r.json || {}));
   }
 
   // 5. Невалидные UUID в path params
@@ -763,7 +801,7 @@ async function runSecurity() {
   ]) {
     const r = await apiReq(m, p, null, '');
     const ok = r.status === 422 || r.status === 404 || r.status === 401;
-    rec(`/api${p}`, m, '401/404/422', r.status, ok, JSON.stringify(r.json || {}).slice(0, 80));
+    rec(`/api${p}`, m, '401/404/422', r.status, ok, JSON.stringify(r.json || {}));
   }
 
   // 6. PUT с пустым телом
@@ -774,9 +812,9 @@ async function runSecurity() {
       sess = await newSession();
       const r = await apiReq('PUT', '/users/me', {}, sess.cookie);
       rec('/api/users/me (пустой PUT)', 'PUT', '200/422', r.status,
-        r.status === 200 || r.status === 422, JSON.stringify(r.json || {}).slice(0, 80));
+        r.status === 200 || r.status === 422, JSON.stringify(r.json || {}));
     } catch (e) {
-      rec('/api/users/me (пустой PUT)', 'PUT', '200/422', 'ошибка', null, e.message.slice(0, 60));
+      rec('/api/users/me (пустой PUT)', 'PUT', '200/422', 'ошибка', null, e.message);
     }
   }
 }
@@ -834,7 +872,7 @@ async function runUi() {
         }
 
       } catch (e) {
-        rec(pg.path, 'GET', 200, 'ошибка', false, e.message.slice(0, 80));
+        rec(pg.path, 'GET', 200, 'ошибка', false, e.message);
       }
     }
 
@@ -914,7 +952,7 @@ async function runScenarios() {
           consistent ? 'поле совпадает ✓' : `⚠️ ожидал "${uniqueName}", получил "${getR.json?.first_name}"`);
       }
     } catch (e) {
-      rec('profile consistency', 'SCENARIO', 'ok', 'ошибка', null, e.message.slice(0, 80));
+      rec('profile consistency', 'SCENARIO', 'ok', 'ошибка', null, e.message);
     }
   }
 
@@ -930,7 +968,7 @@ async function runScenarios() {
       rec('/api/users/user (cookie после logout)', 'GET', 401, r.status, r.status === 401,
         r.status === 200 ? '⚠️ КРИТИЧНО: сессия не инвалидирована после logout!' : 'сессия корректно инвалидирована ✓');
     } catch (e) {
-      rec('stale cookie after logout', 'SCENARIO', 401, 'ошибка', null, e.message.slice(0, 80));
+      rec('stale cookie after logout', 'SCENARIO', 401, 'ошибка', null, e.message);
     }
   }
 
@@ -954,7 +992,7 @@ async function runScenarios() {
           newLoginR.status !== 200 ? '⚠️ новый пароль не работает' : '');
       }
     } catch (e) {
-      rec('password change flow', 'SCENARIO', 'ok', 'ошибка', null, e.message.slice(0, 80));
+      rec('password change flow', 'SCENARIO', 'ok', 'ошибка', null, e.message);
     }
   }
 
@@ -979,7 +1017,7 @@ async function runScenarios() {
         rec('double-cancel setup', 'POST', '200/201', cr.status, null, 'appointment не создан');
       }
     } catch (e) {
-      rec('double-cancel', 'SCENARIO', '4xx', 'ошибка', null, e.message.slice(0, 80));
+      rec('double-cancel', 'SCENARIO', '4xx', 'ошибка', null, e.message);
     }
   }
 
@@ -1006,7 +1044,7 @@ async function runScenarios() {
         rec('cross-user isolation setup', 'POST', '200/201', cr.status, null, 'appointment не создан');
       }
     } catch (e) {
-      rec('cross-user isolation', 'SCENARIO', '403/404', 'ошибка', null, e.message.slice(0, 80));
+      rec('cross-user isolation', 'SCENARIO', '403/404', 'ошибка', null, e.message);
     }
   }
 
@@ -1025,7 +1063,7 @@ async function runScenarios() {
         r.status === 200 || r.status === 201 ? '⚠️ сервер принял запись на прошедшее время!' : `отклонён: ${r.status} ✓`);
       if (r.json?.id) await apiReq('PUT', `/appointments/${r.json.id}/cancel`, { cancel_reason: 'cleanup' }, sess.cookie);
     } catch (e) {
-      rec('past-date appointment', 'SCENARIO', 422, 'ошибка', null, e.message.slice(0, 80));
+      rec('past-date appointment', 'SCENARIO', 422, 'ошибка', null, e.message);
     }
   }
 
@@ -1043,7 +1081,7 @@ async function runScenarios() {
         r.status === 201 || r.status === 200 ? `принят (id=${r.json?.id?.slice(0, 8)}…)` : `отклонён: ${r.status}`);
       if (r.json?.id) await apiReq('PUT', `/appointments/${r.json.id}/cancel`, { cancel_reason: 'cleanup' }, sess.cookie);
     } catch (e) {
-      rec('far-future appointment', 'SCENARIO', '201/422', 'ошибка', null, e.message.slice(0, 80));
+      rec('far-future appointment', 'SCENARIO', '201/422', 'ошибка', null, e.message);
     }
   }
 
@@ -1068,7 +1106,7 @@ async function runScenarios() {
         if (r.json?.id) await apiReq('PUT', `/appointments/${r.json.id}/cancel`, { cancel_reason: 'cleanup' }, sess.cookie);
       }
     } catch (e) {
-      rec('double-booking', 'SCENARIO', 'conflict', 'ошибка', null, e.message.slice(0, 80));
+      rec('double-booking', 'SCENARIO', 'conflict', 'ошибка', null, e.message);
     }
   }
 
@@ -1111,7 +1149,7 @@ async function runScenarios() {
         rec('application isolation setup', 'POST', '200/201', cr.status, null, 'заявка не создана');
       }
     } catch (e) {
-      rec('application isolation', 'SCENARIO', '403/404', 'ошибка', null, e.message.slice(0, 80));
+      rec('application isolation', 'SCENARIO', '403/404', 'ошибка', null, e.message);
     }
   }
 
@@ -1220,7 +1258,7 @@ async function runChaos() {
         rec('race condition setup', 'POST', '200/201', cr.status, null, 'appointment не создан');
       }
     } catch (e) {
-      rec('race condition cancel', 'RACE', '≤1×200', 'ошибка', null, e.message.slice(0, 80));
+      rec('race condition cancel', 'RACE', '≤1×200', 'ошибка', null, e.message);
     }
   } else {
     rec('race condition (нет терапевтов)', 'SKIP', '—', '—', null, '');
@@ -1239,7 +1277,7 @@ async function runChaos() {
         ok.length === 5 && consistent,
         consistent ? '✓ каждый получил свой профиль' : '⚠️ КРИТИЧНО: данные перемешались между сессиями!');
     } catch (e) {
-      rec('concurrent sessions', 'PARALLEL', '5×200', 'ошибка', null, e.message.slice(0, 80));
+      rec('concurrent sessions', 'PARALLEL', '5×200', 'ошибка', null, e.message);
     }
   }
 
@@ -1276,7 +1314,7 @@ async function runChaos() {
         ok.length === N ? true : ok.length >= N * 0.8 ? null : false,
         `p50=${pct(times, 50)}ms  p95=${pct(times, 95)}ms${fail.length ? `  упало: ${fail.map(r => r.status).join(',')}` : ''}`);
     } catch (e) {
-      rec('burst login storm', 'PARALLEL', '15×200', 'ошибка', null, e.message.slice(0, 80));
+      rec('burst login storm', 'PARALLEL', '15×200', 'ошибка', null, e.message);
     }
   }
 }
@@ -1373,14 +1411,14 @@ async function runEdge() {
       first_name: null, last_name: 'Test', phone_number: '+79991234567', email: testEmail(), password: 'TestPass123!',
     }, null);
     rec('/api/users/register (first_name: null)', 'POST', 422, r.status, r.status === 422,
-      JSON.stringify(r.json || {}).slice(0, 80));
+      JSON.stringify(r.json || {}));
   }
 
   // Empty string for required field
   {
     const r = await tryReg({ first_name: '' });
     rec('/api/users/register (first_name: "")', 'POST', 422, r.status, r.status === 422,
-      JSON.stringify(r.json || {}).slice(0, 80));
+      JSON.stringify(r.json || {}));
   }
 
   // Whitespace-only name
@@ -1456,7 +1494,7 @@ async function runEdge() {
         }
       }
     } catch (e) {
-      rec('appointment edge cases', 'EDGE', 'ok', 'ошибка', null, e.message.slice(0, 80));
+      rec('appointment edge cases', 'EDGE', 'ok', 'ошибка', null, e.message);
     }
 
     // Very long problem_description in application
@@ -1478,7 +1516,7 @@ async function runEdge() {
           await apiReq('POST', `/applications/${r.json.id}/cancel`, { cancel_reason: 'cleanup', cancel_initiator: 'user' }, sess2.cookie);
         }
       } catch (e) {
-        rec('long problem_description', 'EDGE', '200/422', 'ошибка', null, e.message.slice(0, 80));
+        rec('long problem_description', 'EDGE', '200/422', 'ошибка', null, e.message);
       }
     }
   } else {
@@ -1492,13 +1530,13 @@ async function runEdge() {
     const r = await apiReq('PATCH', '/users/me', { first_name: 'x' }, '');
     rec('/api/users/me (PATCH вместо PUT)', 'PATCH', '404/405/401', r.status,
       r.status === 404 || r.status === 405 || r.status === 401 || r.status === 422,
-      JSON.stringify(r.json || {}).slice(0, 60));
+      JSON.stringify(r.json || {}));
   }
   {
     const r = await apiReq('DELETE', '/users/user', null, '');
     rec('/api/users/user (DELETE)', 'DELETE', '404/405/401', r.status,
       r.status === 404 || r.status === 405 || r.status === 401,
-      JSON.stringify(r.json || {}).slice(0, 60));
+      JSON.stringify(r.json || {}));
   }
 
   // Wrong Content-Type
@@ -1513,7 +1551,7 @@ async function runEdge() {
         res.status === 415 || res.status === 422 || res.status === 400,
         res.status === 201 || res.status === 200 ? '⚠️ принят с неверным Content-Type' : `отклонён: ${res.status} ✓`);
     } catch (e) {
-      rec('/api/users/register (text/plain Content-Type)', 'POST', '415/422', 'network err', null, e.message.slice(0, 60));
+      rec('/api/users/register (text/plain Content-Type)', 'POST', '415/422', 'network err', null, e.message);
     }
   }
 
@@ -1579,7 +1617,7 @@ async function runEdge() {
         'фиксируем', codes.join('/'), null,
         `absent=${rAbsent.status} | null=${rNull.status} | ""=${rEmpty.status}  ${allSame ? '(одинаково)' : '(поведение различается)'}`);
     } catch (e) {
-      rec('PUT null vs absent vs empty', 'EDGE', 'ok', 'ошибка', null, e.message.slice(0, 80));
+      rec('PUT null vs absent vs empty', 'EDGE', 'ok', 'ошибка', null, e.message);
     }
   }
 }
@@ -1611,7 +1649,7 @@ async function runInfra() {
           ? `⚠️ КРИТИЧНО: CORS открыт для произвольных Origins! ACAO="${acao}" credentials=${creds}`
           : `ACAO="${acao}"  credentials=${creds}`);
     } catch (e) {
-      rec('CORS probe', 'OPTIONS', 'ok', 'network err', null, e.message.slice(0, 80));
+      rec('CORS probe', 'OPTIONS', 'ok', 'network err', null, e.message);
     }
   }
 
@@ -1655,7 +1693,7 @@ async function runInfra() {
   for (const [endpoint, label] of [[BASE + '/', 'frontend /'], [`${API}/therapists/`, 'API /therapists/']]) {
     let res;
     try { res = await fetch(endpoint); }
-    catch (e) { rec(`Security headers (${label})`, 'GET', 'ok', 'network err', null, e.message.slice(0, 60)); continue; }
+    catch (e) { rec(`Security headers (${label})`, 'GET', 'ok', 'network err', null, e.message); continue; }
     console.log(`\n  ${C.dim}  ${label}:${C.reset}`);
     for (const header of secHeaders) {
       const val = res.headers.get(header) || res.headers.get(header.toLowerCase());
@@ -1680,7 +1718,7 @@ async function runAuthz() {
   try {
     [sessA, sessB] = await Promise.all([newSession(), newSession()]);
   } catch (e) {
-    rec('authz setup', 'SETUP', 'ok', 'ошибка', false, 'Не удалось создать пользователей: ' + e.message.slice(0, 60));
+    rec('authz setup', 'SETUP', 'ok', 'ошибка', false, 'Не удалось создать пользователей: ' + e.message);
     return;
   }
   console.log(`  user_A: ${sessA.email}  [${sessA.userId?.slice(0, 8)}…]`);
@@ -1847,7 +1885,7 @@ async function runStability() {
         avg < SLOW_MS * 2,
         `avg=${avg}ms  max=${max}ms${errors ? `  ⚠️ auth errors=${errors}` : '  без ошибок ✓'}`);
     } catch (e) {
-      rec('read/write interleave', 'LOAD', 'ok', 'ошибка', null, e.message.slice(0, 80));
+      rec('read/write interleave', 'LOAD', 'ok', 'ошибка', null, e.message);
     }
   }
 }
@@ -1868,7 +1906,7 @@ async function runAdmin() {
   // Логин под администратором
   const lr = await apiReq('POST', '/users/login', { email: ADMIN_EMAIL, password: ADMIN_PASSWORD }, null);
   rec('/api/users/login (admin)', 'POST', 200, lr.status, lr.status === 200,
-    lr.json?.id ? `id=${lr.json.id.slice(0, 8)}…` : JSON.stringify(lr.json || {}).slice(0, 80));
+    lr.json?.id ? `id=${lr.json.id.slice(0, 8)}…` : JSON.stringify(lr.json || {}));
 
   if (lr.status !== 200) {
     console.log(`${C.red}❌ Не удалось войти под администратором.${C.reset}\n`);
@@ -1880,7 +1918,7 @@ async function runAdmin() {
   {
     const r = await apiReq('GET', '/users/user', null, adminCookie);
     rec('/api/users/user (admin)', 'GET', 200, r.status, r.status === 200,
-      r.json?.email || JSON.stringify(r.json || {}).slice(0, 80));
+      r.json?.email || JSON.stringify(r.json || {}));
     if (VERBOSE) console.log(`${C.dim}  Роль: ${r.json?.role || '?'}${C.reset}`);
   }
 
@@ -1889,7 +1927,7 @@ async function runAdmin() {
     const r = await apiReq('GET', '/users/', null, adminCookie);
     rec('/api/users/ (все пользователи)', 'GET', '200/403', r.status,
       r.status === 200 || r.status === 403,
-      Array.isArray(r.json) ? `${r.json.length} пользователей` : JSON.stringify(r.json || {}).slice(0, 80));
+      Array.isArray(r.json) ? `${r.json.length} пользователей` : JSON.stringify(r.json || {}));
   }
 
   // Список всех заявок (admin view)
@@ -1897,7 +1935,7 @@ async function runAdmin() {
     const r = await apiReq('GET', '/applications/?skip=0&limit=10', null, adminCookie);
     rec('/api/applications/ (admin, все заявки)', 'GET', '200/403', r.status,
       r.status === 200 || r.status === 403,
-      Array.isArray(r.json) ? `${r.json.length} заявок` : JSON.stringify(r.json || {}).slice(0, 80));
+      Array.isArray(r.json) ? `${r.json.length} заявок` : JSON.stringify(r.json || {}));
   }
 
   // Список всех записей (admin view)
@@ -1905,7 +1943,7 @@ async function runAdmin() {
     const r = await apiReq('GET', '/appointments/?skip=0&limit=10', null, adminCookie);
     rec('/api/appointments/ (admin, все записи)', 'GET', '200/403', r.status,
       r.status === 200 || r.status === 403,
-      Array.isArray(r.json) ? `${r.json.length} записей` : JSON.stringify(r.json || {}).slice(0, 80));
+      Array.isArray(r.json) ? `${r.json.length} записей` : JSON.stringify(r.json || {}));
   }
 
   // Попытка удалить несуществующего пользователя (не должна паниковать)
@@ -1913,7 +1951,7 @@ async function runAdmin() {
     const r = await apiReq('DELETE', '/users/00000000-0000-0000-0000-000000000000', null, adminCookie);
     rec('/api/users/{id} DELETE (несуществующий)', 'DELETE', '403/404/405', r.status,
       r.status === 403 || r.status === 404 || r.status === 405 || r.status === 422,
-      JSON.stringify(r.json || {}).slice(0, 80));
+      JSON.stringify(r.json || {}));
   }
 }
 
@@ -1954,6 +1992,8 @@ async function runAll() {
     sections.push({ name, snap });
   }
 
+  saveStructuredResults(sections.map(s => ({ name: s.name, ...s.snap })));
+
   const total = sections.reduce(
     (acc, s) => ({ pass: acc.pass + s.snap.pass, fail: acc.fail + s.snap.fail, warn: acc.warn + s.snap.warn }),
     { pass: 0, fail: 0, warn: 0 }
@@ -1972,12 +2012,13 @@ async function runAll() {
     md += `## ${name.toUpperCase()}  (✅ ${snap.pass} | ❌ ${snap.fail} | ⚠️ ${snap.warn})\n\n`;
     md += `| # | Рез | Метод | Эндпоинт | Ожид | Факт | Детали |\n|---|---|---|---|---|---|---|\n`;
     md += snap.rows.map((r, i) =>
-      `| ${i + 1} | ${r.icon} | \`${r.method}\` | ${r.endpoint} | ${r.expected} | ${r.actual} | ${r.details.slice(0, 150)} |`
+      `| ${i + 1} | ${r.icon} | \`${r.method}\` | ${r.endpoint} | ${r.expected} | ${r.actual} | ${r.details} |`
     ).join('\n');
     md += '\n\n';
   }
 
-  const fname = path.join(__dirname, `full-report-${TS}.md`);
+  fs.mkdirSync(REPORT_DIR, { recursive: true });
+  const fname = path.join(REPORT_DIR, `full-report-${TS}.md`);
   fs.writeFileSync(fname, md, 'utf8');
 
   console.log(`\n${C.cyan}📋 Полный отчёт: ${fname}${C.reset}`);
@@ -2060,6 +2101,10 @@ if (!modeMap[MODE]) {
   } else {
     await modeMap[MODE]();
     saveReport(MODE);
+    saveStructuredResults([{
+      name: (modeArg || '').replace(/^--/, ''),
+      pass: R.pass, fail: R.fail, warn: R.warn, rows: [...R.rows],
+    }]);
     printSummary();
     printTeardown();
   }

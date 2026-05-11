@@ -1,0 +1,1465 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Psychohelp · Test Dashboard</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg:#0d1117; --surface:#161b22; --surface2:#1c2128; --border:#21262d;
+  --muted:#484f58; --text:#c9d1d9; --heading:#f0f6fc;
+  --green:#3fb950; --red:#f85149; --yellow:#d29922;
+  --cyan:#79c0ff; --purple:#bc8cff; --orange:#ffa657;
+  --mono:'JetBrains Mono','Cascadia Code','Fira Code',Consolas,monospace;
+  --ui:-apple-system,'Segoe UI',system-ui,sans-serif;
+}
+html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--ui);font-size:14px;line-height:1.5}
+
+/* ── Header ── */
+.app-header{background:var(--surface);border-bottom:1px solid var(--border);padding:10px 20px;
+  display:flex;align-items:center;gap:14px;position:sticky;top:0;z-index:100;min-height:52px}
+.app-header h1{font-size:16px;font-weight:700;color:var(--heading);white-space:nowrap}
+.hdr-url{font-family:var(--mono);font-size:11px;color:var(--cyan);background:rgba(121,192,255,.08);
+  padding:3px 8px;border-radius:4px;border:1px solid rgba(121,192,255,.2);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:260px}
+.hdr-status{margin-left:auto;font-size:11px;font-weight:600;padding:3px 10px;border-radius:10px;white-space:nowrap;flex-shrink:0}
+.s-idle    {background:rgba(72,79,88,.3);   color:var(--muted); border:1px solid var(--border)}
+.s-running {background:rgba(210,153,34,.12);color:var(--yellow);border:1px solid rgba(210,153,34,.3);animation:pulse 1.5s ease-in-out infinite}
+.s-done    {background:rgba(63,185,80,.1);  color:var(--green); border:1px solid rgba(63,185,80,.3)}
+.s-fail    {background:rgba(248,81,73,.1);  color:var(--red);   border:1px solid rgba(248,81,73,.3)}
+.s-cancelled{background:rgba(188,140,255,.1);color:var(--purple);border:1px solid rgba(188,140,255,.3)}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.6}}
+.hdr-nav{display:flex;gap:4px}
+.hn-btn{background:transparent;border:1px solid transparent;color:var(--muted);
+  padding:3px 10px;border-radius:4px;font-size:11px;cursor:pointer;transition:all .15s;white-space:nowrap}
+.hn-btn:hover{color:var(--text);border-color:var(--border)}
+.hn-btn.active{color:var(--heading);background:var(--surface2);border-color:var(--border)}
+.hdr-btns{display:flex;gap:8px}
+.hdr-btn{background:transparent;border:1px solid var(--border);color:var(--muted);
+  padding:3px 9px;border-radius:4px;font-size:11px;cursor:pointer;transition:all .15s}
+.hdr-btn:hover{color:var(--text);border-color:var(--muted)}
+.hdr-btn.active{color:var(--cyan);border-color:rgba(121,192,255,.3)}
+@media(max-width:820px){
+  .hdr-url{display:none}
+  .app-header h1{font-size:13px}
+}
+@media(max-width:600px){
+  .hn-btn{padding:3px 7px;font-size:10px}
+  .hdr-status{display:none}
+}
+/* ── Analytics ── */
+.analytics-wrap{flex:1;overflow-y:auto;padding:16px 20px;display:flex;flex-direction:column;gap:20px}
+.an-section{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px 16px}
+.an-title{font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin:0 0 12px}
+.an-loading{color:var(--muted);font-size:12px;padding:8px 0}
+.an-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:8px}
+.an-card{background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:10px 12px;cursor:pointer;transition:border-color .15s}
+.an-card:hover{border-color:var(--muted)}
+.an-card.selected{border-color:var(--cyan)}
+.an-card-top{display:flex;align-items:center;gap:7px;margin-bottom:6px}
+.an-card-icon{font-size:14px}
+.an-card-label{font-size:12px;font-weight:600;color:var(--heading);flex:1}
+.an-card-rate{font-size:11px;font-weight:700;font-family:var(--mono)}
+.an-card-meta{font-size:10px;color:var(--muted)}
+.an-card-bar{height:3px;border-radius:2px;background:var(--border);margin-top:6px;overflow:hidden}
+.an-card-fill{height:100%;border-radius:2px;transition:width .4s}
+.an-spark{display:flex;align-items:flex-end;gap:2px;height:20px;margin-top:4px}
+.an-spark-dot{width:6px;border-radius:1px;min-height:2px;flex-shrink:0}
+.an-chart-box{overflow-x:auto}
+.an-chart-box svg{display:block;width:100%;height:auto}
+.an-no-data{color:var(--muted);font-size:11px;padding:16px 0;text-align:center}
+.cov-mode{border:1px solid var(--border);border-radius:6px;margin-bottom:6px;overflow:hidden}
+.cov-summary{display:flex;align-items:center;gap:8px;padding:8px 12px;cursor:pointer;user-select:none;
+  background:var(--surface2);font-size:12px;font-weight:600;color:var(--heading);list-style:none}
+.cov-summary:hover{background:#1c2128}
+.cov-summary .cov-icon{font-size:14px}
+.cov-summary .cov-cnt{margin-left:auto;font-size:10px;color:var(--muted);font-weight:400;font-family:var(--mono)}
+.cov-table{width:100%;border-collapse:collapse;font-size:11px}
+.cov-table td{padding:5px 10px;border-bottom:1px solid var(--border);vertical-align:top}
+.cov-table tr:last-child td{border-bottom:none}
+.cov-table td:first-child{width:52px;font-family:var(--mono);color:var(--cyan);white-space:nowrap}
+.cov-table td:nth-child(2){width:200px;font-family:var(--mono);color:var(--muted);word-break:break-all}
+.cov-table td:nth-child(3){color:var(--text)}
+/* ── History filters ── */
+.hist-filters{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:6px}
+.hf-btn{background:transparent;border:1px solid var(--border);color:var(--muted);
+  padding:2px 8px;border-radius:4px;font-size:10px;cursor:pointer;transition:all .15s;white-space:nowrap}
+.hf-btn:hover{color:var(--text);border-color:var(--muted)}
+.hf-btn.active{color:var(--heading);background:var(--surface2);border-color:var(--muted)}
+.hf-select{background:var(--surface2);border:1px solid var(--border);color:var(--text);
+  padding:2px 6px;border-radius:4px;font-size:10px;cursor:pointer}
+/* ── Failures widget ── */
+.fail-table{width:100%;border-collapse:collapse;font-size:11px}
+.fail-table th{text-align:left;padding:5px 8px;border-bottom:1px solid var(--border);
+  font-size:9px;text-transform:uppercase;color:var(--muted);letter-spacing:.06em}
+.fail-table td{padding:5px 8px;border-bottom:1px solid #0d1117;vertical-align:middle}
+.fail-table tr:last-child td{border-bottom:none}
+.fail-rate-bar{width:80px;height:5px;background:var(--border);border-radius:3px;overflow:hidden;display:inline-block;vertical-align:middle;margin-right:5px}
+.fail-rate-fill{height:100%;border-radius:3px}
+.fail-cnt{font-family:var(--mono);font-size:11px}
+.cov-live-badge{font-size:9px;padding:1px 5px;border-radius:3px;background:rgba(63,185,80,.12);
+  color:#3fb950;border:1px solid rgba(63,185,80,.2);margin-left:6px;font-weight:400;font-family:var(--mono)}
+.cov-static-badge{font-size:9px;padding:1px 5px;border-radius:3px;background:rgba(121,192,255,.08);
+  color:#79c0ff;border:1px solid rgba(121,192,255,.15);margin-left:6px;font-weight:400;font-family:var(--mono)}
+
+/* ── Layout ── */
+.app-body{display:flex;height:calc(100vh - 52px);overflow:hidden}
+
+/* ── Sidebar ── */
+.sidebar{width:220px;min-width:220px;background:var(--surface);border-right:1px solid var(--border);
+  overflow-y:auto;padding:10px 6px;display:flex;flex-direction:column;gap:2px}
+.sb-label{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;
+  color:var(--muted);padding:10px 8px 4px;margin-top:4px}
+.sb-label:first-child{margin-top:0}
+.mode-btn{display:flex;align-items:center;gap:8px;padding:7px 8px;border-radius:6px;
+  border:1px solid transparent;background:transparent;color:var(--text);
+  cursor:pointer;text-align:left;width:100%;transition:background .1s,border-color .1s}
+.mode-btn:hover{background:var(--surface2);border-color:var(--border)}
+.mode-btn.selected{background:rgba(121,192,255,.08);border-color:rgba(121,192,255,.25);color:var(--heading)}
+.m-icon{font-size:15px;flex-shrink:0;width:20px;text-align:center}
+.m-info{flex:1;min-width:0}
+.m-name{font-size:12px;font-weight:500}
+.m-est {font-size:10px;color:var(--muted)}
+.m-badge{font-size:10px;padding:1px 5px;border-radius:3px;font-weight:600;flex-shrink:0}
+.c-quick     {background:rgba(121,192,255,.12);color:#58a6ff}
+.c-functional{background:rgba(63,185,80,.12); color:#56d364}
+.c-security  {background:rgba(255,166,87,.12);color:var(--orange)}
+.c-perf      {background:rgba(248,81,73,.12); color:#ff7b72}
+.c-admin     {background:rgba(210,153,34,.15);color:var(--yellow)}
+.c-all       {background:rgba(188,140,255,.12);color:var(--purple)}
+
+/* ── Main ── */
+.main-area{flex:1;overflow:hidden;padding:14px 18px;display:flex;flex-direction:column}
+
+/* ── Config ── */
+.config-wrap{background:var(--surface);border:1px solid var(--border);border-radius:8px;flex-shrink:0}
+.cfg-summary{padding:9px 14px;cursor:pointer;font-size:12px;font-weight:600;color:var(--heading);
+  user-select:none;list-style:none;display:flex;align-items:center;gap:8px}
+.cfg-summary::after{content:'▾';margin-left:auto;color:var(--muted);transition:transform .2s}
+details[open] .cfg-summary::after{transform:rotate(180deg)}
+.cfg-grid{padding:0 14px 14px;display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.cfg-field label{display:block;font-size:10px;color:var(--muted);margin-bottom:3px;font-weight:600;text-transform:uppercase;letter-spacing:.05em}
+.cfg-field input[type=text],.cfg-field input[type=email],.cfg-field input[type=password],.cfg-field input[type=number]{
+  width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:5px;
+  padding:5px 9px;color:var(--text);font-family:var(--mono);font-size:11px;outline:none;transition:border-color .15s}
+.cfg-field input:focus{border-color:var(--cyan)}
+.cfg-field input::placeholder{color:var(--muted)}
+.cfg-toggles{grid-column:1/-1;display:flex;gap:20px;flex-wrap:wrap}
+.cfg-toggles label{display:flex;align-items:center;gap:6px;cursor:pointer;font-size:12px}
+.cfg-toggles input[type=checkbox]{accent-color:var(--cyan);width:13px;height:13px}
+.cfg-sep{grid-column:1/-1;border:none;border-top:1px solid var(--border);margin:4px 0}
+/* Profiles */
+.profiles-row{grid-column:1/-1;display:flex;gap:8px;align-items:center}
+.profiles-row select{flex:1;background:var(--surface2);border:1px solid var(--border);
+  border-radius:5px;padding:5px 9px;color:var(--text);font-size:12px;outline:none}
+.btn-sm{background:transparent;border:1px solid var(--border);color:var(--muted);
+  padding:4px 10px;border-radius:5px;font-size:11px;cursor:pointer;white-space:nowrap;transition:all .15s}
+.btn-sm:hover{color:var(--text);border-color:var(--muted)}
+.btn-sm.danger:hover{color:var(--red);border-color:rgba(248,81,73,.4)}
+
+/* ── Run bar ── */
+.run-bar{display:flex;align-items:center;gap:12px;background:var(--surface);
+  border:1px solid var(--border);border-radius:8px;padding:10px 14px;flex-shrink:0}
+.sel-info{flex:1;display:flex;align-items:center;gap:10px;min-width:0}
+.sel-icon{font-size:20px;flex-shrink:0}
+.sel-text{min-width:0}
+.sel-name{font-weight:600;font-size:13px;color:var(--heading)}
+.sel-desc{font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.run-timer{font-family:var(--mono);font-size:11px;color:var(--muted);flex-shrink:0;min-width:40px;text-align:right}
+.btn-run{padding:7px 18px;background:var(--green);color:#000;border:none;border-radius:6px;
+  font-weight:700;font-size:12px;cursor:pointer;display:flex;align-items:center;gap:5px;
+  transition:opacity .15s;flex-shrink:0}
+.btn-run:hover:not(:disabled){opacity:.85}
+.btn-run:disabled{opacity:.35;cursor:not-allowed}
+.btn-stop{padding:7px 14px;background:transparent;color:var(--red);border:1px solid rgba(248,81,73,.5);
+  border-radius:6px;font-weight:600;font-size:12px;cursor:pointer;flex-shrink:0;transition:background .15s}
+.btn-stop:hover{background:rgba(248,81,73,.08)}
+.btn-rerun{padding:7px 14px;background:transparent;color:var(--cyan);border:1px solid rgba(121,192,255,.4);
+  border-radius:6px;font-weight:600;font-size:12px;cursor:pointer;flex-shrink:0;transition:background .15s}
+.btn-rerun:hover{background:rgba(121,192,255,.08)}
+
+/* ── Progress (--all mode) ── */
+.progress-wrap{flex-shrink:0;background:var(--surface);border:1px solid var(--border);
+  border-radius:8px;padding:10px 14px}
+.progress-label{font-size:11px;color:var(--muted);margin-bottom:6px;display:flex;justify-content:space-between}
+.progress-bar-bg{background:var(--border);border-radius:4px;height:6px;overflow:hidden}
+.progress-bar-fg{height:100%;background:var(--cyan);border-radius:4px;transition:width .4s ease}
+
+/* ── Stats ── */
+.stats-bar{display:flex;gap:10px;flex-shrink:0}
+.stat-card{background:var(--surface);border:1px solid var(--border);border-radius:8px;
+  padding:8px 16px;display:flex;align-items:center;gap:10px;flex:1}
+.stat-emoji{font-size:18px}
+.stat-num{font-size:26px;font-weight:800;font-family:var(--mono);line-height:1}
+.stat-lbl{font-size:10px;color:var(--muted);font-weight:500;text-transform:uppercase;letter-spacing:.05em;margin-top:1px}
+.stat-pass{border-color:rgba(63,185,80,.2)}.stat-pass .stat-num{color:var(--green)}
+.stat-fail{border-color:rgba(248,81,73,.2)}.stat-fail .stat-num{color:var(--red)}
+.stat-warn{border-color:rgba(210,153,34,.2)}.stat-warn .stat-num{color:var(--yellow)}
+
+/* ── Terminal ── */
+.terminal-wrap{flex:1;min-height:160px;background:#010409;border:1px solid var(--border);
+  border-radius:8px;display:flex;flex-direction:column;overflow:hidden}
+.term-header{background:var(--surface);border-bottom:1px solid var(--border);padding:6px 12px;
+  display:flex;align-items:center;gap:8px;flex-shrink:0}
+.term-dots{display:flex;gap:5px}
+.term-dots span{width:10px;height:10px;border-radius:50%}
+.dot-r{background:#ff5f56}.dot-y{background:#ffbd2e}.dot-g{background:#27c93f}
+.term-title{font-family:var(--mono);font-size:11px;color:var(--muted);flex:1;margin-left:4px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.spin{width:11px;height:11px;border:2px solid var(--border);border-top-color:var(--cyan);
+  border-radius:50%;animation:spin .7s linear infinite;flex-shrink:0}
+@keyframes spin{to{transform:rotate(360deg)}}
+.term-filter-btns{display:flex;gap:4px}
+.tfb{background:transparent;border:1px solid var(--border);color:var(--muted);
+  padding:2px 7px;border-radius:4px;font-size:10px;cursor:pointer;transition:all .15s}
+.tfb:hover{color:var(--text);border-color:var(--muted)}
+.tfb.active{color:var(--heading);background:var(--surface2);border-color:var(--muted)}
+.report-drop-wrap{position:relative;display:none}
+.report-drop-wrap.visible{display:block}
+.report-drop-menu{display:none;position:absolute;right:0;top:calc(100% + 4px);background:var(--surface2);border:1px solid var(--border);border-radius:6px;z-index:50;min-width:148px;padding:4px 0;box-shadow:0 4px 16px #0006}
+.report-drop-menu.open{display:block}
+.report-drop-menu a{display:flex;align-items:center;gap:7px;padding:5px 12px;color:var(--text);text-decoration:none;font-size:11px;white-space:nowrap}
+.report-drop-menu a:hover{background:var(--border);color:var(--heading)}
+.rdm-section{padding:4px 12px 2px;font-size:9px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);pointer-events:none}
+.rdm-sep{height:1px;background:var(--border);margin:4px 0}
+.term-out{flex:1;overflow-y:auto;padding:10px 12px;font-family:var(--mono);font-size:12px;line-height:1.65}
+.term-out:empty::before{content:'Выберите режим и нажмите «Запустить»';color:var(--muted);font-style:italic}
+.tl{white-space:pre-wrap;word-break:break-word}
+.tl-pass{color:#3fb950}.tl-fail{color:#f85149}.tl-warn{color:#e3b341}
+.tl-header{color:#79c0ff;font-weight:bold}.tl-sep{color:#21262d}.tl-summary{color:#f0f6fc;font-weight:bold}
+.tl-report{color:#79c0ff}.tl-dim{color:#484f58}.tl-err{color:#f85149;opacity:.65}
+.tl-search-match{background:rgba(210,153,34,.25);border-radius:2px}
+
+/* ── Search overlay ── */
+.search-bar{position:absolute;top:52px;right:20px;background:var(--surface2);
+  border:1px solid var(--border);border-radius:8px;padding:8px 12px;
+  display:flex;align-items:center;gap:8px;z-index:50;box-shadow:0 4px 16px rgba(0,0,0,.4)}
+.search-bar input{background:transparent;border:none;color:var(--text);font-family:var(--mono);
+  font-size:12px;outline:none;width:200px}
+.search-info{font-size:11px;color:var(--muted);white-space:nowrap}
+.search-nav{background:transparent;border:1px solid var(--border);color:var(--muted);
+  padding:2px 7px;border-radius:3px;font-size:11px;cursor:pointer}
+.search-nav:hover{color:var(--text)}
+
+/* ── History ── */
+.history-wrap{flex-shrink:0;background:var(--surface);border:1px solid var(--border);
+  border-radius:8px;max-height:220px;overflow:hidden;display:flex;flex-direction:column}
+.history-top{padding:8px 14px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;flex-shrink:0}
+.history-top h3{font-size:12px;font-weight:600;color:var(--heading);flex:1}
+.cmp-btn-wrap{display:flex;gap:6px}
+.history-scroll{overflow-y:auto;flex:1}
+.hist-table{width:100%;border-collapse:collapse;font-size:11px}
+.hist-table th{position:sticky;top:0;background:var(--surface);text-align:left;
+  padding:5px 10px;color:var(--muted);font-weight:600;font-size:10px;
+  text-transform:uppercase;letter-spacing:.05em;border-bottom:1px solid var(--border)}
+.hist-table td{padding:6px 10px;border-bottom:1px solid rgba(33,38,45,.6);vertical-align:middle}
+.hist-table tr:last-child td{border-bottom:none}
+.hist-table tr:hover td{background:var(--surface2)}
+.mode-tag{display:inline-block;padding:1px 6px;border-radius:3px;font-size:10px;font-weight:600;font-family:var(--mono)}
+.mono{font-family:var(--mono)}
+.pass-n{color:var(--green);font-family:var(--mono)}
+.fail-n{color:var(--red);font-family:var(--mono)}
+.warn-n{color:var(--yellow);font-family:var(--mono)}
+.btn-view{background:transparent;border:1px solid var(--border);color:var(--muted);
+  padding:2px 7px;border-radius:4px;font-size:10px;cursor:pointer;transition:all .15s}
+.btn-view:hover{color:var(--text);border-color:var(--muted)}
+.hist-empty{padding:16px;text-align:center;color:var(--muted);font-size:11px}
+.cmp-check{width:13px;height:13px;accent-color:var(--cyan);cursor:pointer}
+/* Trend dots */
+.trend{display:flex;gap:2px;align-items:center}
+.trend-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
+
+/* ── Compare panel ── */
+.compare-wrap{flex-shrink:0;background:var(--surface);border:1px solid rgba(121,192,255,.3);
+  border-radius:8px;overflow:hidden;max-height:280px;display:flex;flex-direction:column}
+.cmp-header{padding:10px 14px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;flex-shrink:0}
+.cmp-header h3{font-size:12px;font-weight:600;color:var(--cyan);flex:1}
+.cmp-meta{font-size:11px;color:var(--muted)}
+.cmp-scroll{overflow-y:auto;flex:1}
+.cmp-table{width:100%;border-collapse:collapse;font-size:11px}
+.cmp-table th{position:sticky;top:0;background:var(--surface);padding:5px 10px;
+  text-align:left;color:var(--muted);font-size:10px;text-transform:uppercase;border-bottom:1px solid var(--border)}
+.cmp-table td{padding:5px 10px;border-bottom:1px solid rgba(33,38,45,.6);vertical-align:middle}
+.cmp-table tr:hover td{background:var(--surface2)}
+.cmp-changed .cmp-key{color:var(--yellow)}
+.cmp-added   .cmp-key{color:var(--green)}
+.cmp-removed .cmp-key{color:var(--red)}
+.cmp-arrow{font-family:var(--mono);font-size:12px}
+
+/* ── Auth overlay ── */
+.auth-overlay{position:fixed;inset:0;background:rgba(1,4,9,.95);
+  display:flex;align-items:center;justify-content:center;z-index:999}
+.auth-box{background:var(--surface);border:1px solid var(--border);border-radius:12px;
+  padding:32px;width:320px;text-align:center}
+.auth-box h2{font-size:18px;font-weight:600;color:var(--heading);margin-bottom:8px}
+.auth-box p{font-size:12px;color:var(--muted);margin-bottom:20px}
+.auth-input{width:100%;background:var(--surface2);border:1px solid var(--border);
+  border-radius:6px;padding:9px 12px;color:var(--text);font-family:var(--mono);
+  font-size:13px;outline:none;text-align:center;margin-bottom:12px;transition:border-color .15s}
+.auth-input:focus{border-color:var(--cyan)}
+.auth-submit{width:100%;background:var(--cyan);color:#000;border:none;border-radius:6px;
+  padding:9px;font-weight:700;font-size:13px;cursor:pointer;transition:opacity .15s}
+.auth-submit:hover{opacity:.85}
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar{width:5px;height:5px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+::-webkit-scrollbar-thumb:hover{background:var(--muted)}
+
+/* ── Toast ── */
+.toast{position:fixed;bottom:18px;right:18px;background:var(--surface2);border:1px solid var(--border);
+  border-radius:7px;padding:9px 14px;font-size:12px;z-index:999;animation:fadeUp .2s ease}
+@keyframes fadeUp{from{opacity:0;transform:translateY(6px)}to{opacity:1}}
+</style>
+</head>
+<body>
+
+<!-- Auth overlay (shown if server requires token) -->
+<div class="auth-overlay" id="auth-overlay" style="display:none">
+  <div class="auth-box">
+    <h2>🔑 Требуется токен</h2>
+    <p>Введите DASHBOARD_TOKEN для доступа к дашборду</p>
+    <input class="auth-input" type="password" id="auth-input" placeholder="Введите токен..."
+           onkeydown="if(event.key==='Enter')submitToken()">
+    <button class="auth-submit" onclick="submitToken()">Войти</button>
+  </div>
+</div>
+
+<!-- Search overlay -->
+<div class="search-bar" id="search-bar" style="display:none">
+  <input type="text" id="search-input" placeholder="Поиск в выводе..."
+         oninput="doSearch()" onkeydown="searchNav(event)">
+  <span class="search-info" id="search-info">0 совпадений</span>
+  <button class="search-nav" onclick="searchMove(-1)">↑</button>
+  <button class="search-nav" onclick="searchMove(1)">↓</button>
+  <button class="search-nav" onclick="closeSearch()">✕</button>
+</div>
+
+<header class="app-header">
+  <h1>🧪 Test Dashboard</h1>
+  <span class="hdr-url" id="hdr-url">http://95.31.169.106</span>
+  <nav class="hdr-nav">
+    <button class="hn-btn active" id="hn-run"       onclick="switchView('run')">▶ Запуск</button>
+    <button class="hn-btn"        id="hn-analytics" onclick="switchView('analytics')">📈 Аналитика</button>
+  </nav>
+  <div class="hdr-btns">
+    <button class="hdr-btn" id="notif-btn" onclick="toggleNotifications()" title="Уведомления браузера">🔔</button>
+  </div>
+  <span class="hdr-status s-idle" id="hdr-status">● Idle</span>
+</header>
+
+<div class="app-body">
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <main class="main-area" style="position:relative">
+
+  <div id="view-run" style="display:flex;flex-direction:column;flex:1;overflow:hidden;gap:10px;min-width:0">
+    <!-- Config -->
+    <details id="cfg-details" class="config-wrap">
+      <summary class="cfg-summary">⚙ Настройки окружения</summary>
+      <div class="cfg-grid">
+        <div class="cfg-field">
+          <label>BASE_URL</label>
+          <input id="cfg-url" type="text" placeholder="http://95.31.169.106">
+        </div>
+        <div class="cfg-field">
+          <label>SLOW_MS (порог медленного ответа)</label>
+          <input id="cfg-slow" type="number" placeholder="2000" min="100" max="30000">
+        </div>
+        <div class="cfg-field">
+          <label>ADMIN_EMAIL</label>
+          <input id="cfg-email" type="email" placeholder="admin@example.com">
+        </div>
+        <div class="cfg-field">
+          <label>ADMIN_PASSWORD</label>
+          <input id="cfg-pass" type="password" placeholder="••••••••" autocomplete="current-password">
+        </div>
+        <div class="cfg-field">
+          <label>Telegram Bot Token</label>
+          <input id="cfg-tg-token" type="text" placeholder="1234567890:AABB...">
+        </div>
+        <div class="cfg-field">
+          <label>Telegram Chat ID</label>
+          <input id="cfg-tg-chat" type="text" placeholder="-100123456789">
+        </div>
+        <div class="cfg-toggles">
+          <label><input type="checkbox" id="cfg-quiet">  --quiet</label>
+          <label><input type="checkbox" id="cfg-verbose"> --verbose</label>
+          <label><input type="checkbox" id="cfg-tg-on" id="cfg-tg-on"> Telegram-уведомления</label>
+        </div>
+        <hr class="cfg-sep">
+        <div class="profiles-row">
+          <select id="profiles-select" onchange="loadProfile()">
+            <option value="">— Профили —</option>
+          </select>
+          <button class="btn-sm" onclick="saveProfile()">Сохранить</button>
+          <button class="btn-sm danger" onclick="deleteProfile()">Удалить</button>
+        </div>
+      </div>
+    </details>
+
+    <!-- Run bar -->
+    <div class="run-bar">
+      <div class="sel-info">
+        <span class="sel-icon" id="sel-icon">🎯</span>
+        <div class="sel-text">
+          <div class="sel-name" id="sel-name">Выберите режим</div>
+          <div class="sel-desc" id="sel-desc">Кликните на карточку слева</div>
+        </div>
+      </div>
+      <span class="run-timer" id="run-timer"></span>
+      <button class="btn-rerun" id="btn-rerun" style="display:none" onclick="rerunLast()">🔄 Повторить</button>
+      <button class="btn-stop"  id="btn-stop"  style="display:none" onclick="stopRun()">⏹ Стоп</button>
+      <button class="btn-run"   id="btn-run"   onclick="startRun()" disabled>▶ Запустить</button>
+    </div>
+
+    <!-- Progress (--all only) -->
+    <div class="progress-wrap" id="progress-wrap" style="display:none">
+      <div class="progress-label">
+        <span id="progress-text">Запуск…</span>
+        <span id="progress-pct">0%</span>
+      </div>
+      <div class="progress-bar-bg"><div class="progress-bar-fg" id="progress-bar" style="width:0%"></div></div>
+    </div>
+
+    <!-- Stats -->
+    <div class="stats-bar" id="stats-bar" style="display:none">
+      <div class="stat-card stat-pass">
+        <span class="stat-emoji">✅</span>
+        <div><div class="stat-num" id="s-pass">0</div><div class="stat-lbl">прошло</div></div>
+      </div>
+      <div class="stat-card stat-fail">
+        <span class="stat-emoji">❌</span>
+        <div><div class="stat-num" id="s-fail">0</div><div class="stat-lbl">упало</div></div>
+      </div>
+      <div class="stat-card stat-warn">
+        <span class="stat-emoji">⚠️</span>
+        <div><div class="stat-num" id="s-warn">0</div><div class="stat-lbl">предупреждений</div></div>
+      </div>
+    </div>
+
+    <!-- Terminal -->
+    <div class="terminal-wrap">
+      <div class="term-header">
+        <div class="term-dots"><span class="dot-r"></span><span class="dot-y"></span><span class="dot-g"></span></div>
+        <span class="term-title" id="term-title">test-suite.js</span>
+        <span class="spin" id="spin" style="display:none"></span>
+        <div class="term-filter-btns">
+          <button class="tfb active" data-filter="all"  onclick="setFilter('all',this)">Все</button>
+          <button class="tfb"        data-filter="fail" onclick="setFilter('fail',this)">❌</button>
+          <button class="tfb"        data-filter="warn" onclick="setFilter('warn',this)">⚠️</button>
+          <button class="tfb"        data-filter="pass" onclick="setFilter('pass',this)">✅</button>
+          <button class="tfb" onclick="openSearch()" title="Ctrl+F">🔍</button>
+          <div class="report-drop-wrap" id="report-drop-wrap">
+            <button class="tfb" onclick="toggleReportMenu(event)">📄 Отчёт ▾</button>
+            <div class="report-drop-menu" id="report-drop-menu">
+              <div class="rdm-section">Открыть</div>
+              <a href="#" onclick="openReport('view','summary');return false">📋 Краткий</a>
+              <a href="#" onclick="openReport('view','standard');return false">📄 Стандартный</a>
+              <a href="#" onclick="openReport('view','full');return false">📚 Подробный</a>
+              <div class="rdm-sep"></div>
+              <div class="rdm-section">Скачать</div>
+              <a href="#" onclick="openReport('dl','summary');return false">📋 Краткий .html</a>
+              <a href="#" onclick="openReport('dl','standard');return false">📄 Стандартный .html</a>
+              <a href="#" onclick="openReport('dl','full');return false">📚 Подробный .html</a>
+              <a href="#" onclick="openReport('dl','md');return false">📝 Markdown .md</a>
+              <a href="#" onclick="openReport('dl','json');return false">📊 JSON .json</a>
+            </div>
+          </div>
+          <button class="tfb" onclick="copyOutput()">📋</button>
+        </div>
+      </div>
+      <div class="term-out" id="term-out"></div>
+    </div>
+
+    <!-- History -->
+    <div class="history-wrap">
+      <div class="history-top">
+        <h3>📜 История запусков</h3>
+        <div class="cmp-btn-wrap">
+          <button class="btn-sm" id="btn-compare" style="display:none" onclick="runCompare()">Сравнить выбранные</button>
+          <button class="btn-sm danger" onclick="clearHistory()">Очистить</button>
+        </div>
+      </div>
+      <div class="hist-filters">
+        <button class="hf-btn active" onclick="setHistFilter('status','all',this)">Все</button>
+        <button class="hf-btn"        onclick="setHistFilter('status','fail',this)">❌ Упали</button>
+        <button class="hf-btn"        onclick="setHistFilter('status','pass',this)">✅ Прошли</button>
+        <select class="hf-select" id="hist-mode-select" onchange="setHistModeFilter(this.value)">
+          <option value="all">Все режимы</option>
+        </select>
+      </div>
+      <div class="history-scroll">
+        <div id="hist-body"><div class="hist-empty">Нет запусков</div></div>
+      </div>
+    </div>
+
+  </div><!-- /view-run -->
+
+    <!-- Analytics panel -->
+    <div class="analytics-wrap" id="analytics-wrap" style="display:none">
+      <div class="an-section">
+        <h3 class="an-title">Статус по режимам</h3>
+        <div class="an-grid" id="an-grid"><div class="an-loading">Загрузка…</div></div>
+      </div>
+      <div class="an-section" id="an-chart-section" style="display:none">
+        <h3 class="an-title">Тренд: <span id="an-chart-mode">—</span></h3>
+        <div class="an-chart-box" id="an-chart-box"></div>
+      </div>
+      <div class="an-section" id="an-failures-section">
+        <h3 class="an-title">Проблемные эндпоинты</h3>
+        <div id="an-failures"><div class="an-loading">Загрузка…</div></div>
+      </div>
+      <div class="an-section">
+        <h3 class="an-title">Состав тестов</h3>
+        <div id="an-coverage"></div>
+      </div>
+    </div>
+
+    <!-- Compare panel -->
+    <div class="compare-wrap" id="compare-wrap" style="display:none">
+      <div class="cmp-header">
+        <h3>🔀 Сравнение прогонов</h3>
+        <span class="cmp-meta" id="cmp-meta"></span>
+        <button class="btn-sm" onclick="closeCompare()">✕</button>
+      </div>
+      <div class="cmp-scroll">
+        <div id="cmp-body"></div>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<script>
+// ─── State ────────────────────────────────────────────────────────────────────
+let modes        = [];
+let selectedMode = null;
+let currentRunId = null;
+let currentSse   = null;
+let timerIv      = null;
+let timerStart   = 0;
+let autoScroll   = true;
+let activeFilter = 'all';
+let serverStatus = {};
+let authToken    = localStorage.getItem('dashboard-token') || '';
+let notifEnabled = localStorage.getItem('notif-enabled') === 'true';
+let selectedForCompare = [];
+let searchMatches = [];
+let searchIdx     = -1;
+let analyticsLoaded = false;
+
+const CAT_BY_MODE = {};
+
+// ─── View switching ───────────────────────────────────────────────────────────
+function switchView(v) {
+  document.getElementById('view-run').style.display        = v === 'run'       ? 'flex' : 'none';
+  document.getElementById('analytics-wrap').style.display  = v === 'analytics' ? 'flex' : 'none';
+  document.getElementById('hn-run').classList.toggle('active',       v === 'run');
+  document.getElementById('hn-analytics').classList.toggle('active', v === 'analytics');
+  if (v === 'analytics') { loadAnalytics(); loadFailures(); loadCoverage(); }
+}
+
+// ─── Analytics ────────────────────────────────────────────────────────────────
+async function loadAnalytics() {
+  const grid = document.getElementById('an-grid');
+  try {
+    const r = await api('/api/analytics');
+    if (!r.ok) { grid.innerHTML = '<div class="an-no-data">Ошибка загрузки</div>'; return; }
+    const data = await r.json();
+    renderAnalyticsGrid(data);
+  } catch(e) { grid.innerHTML = '<div class="an-no-data">Ошибка: ' + e.message + '</div>'; }
+}
+
+function renderAnalyticsGrid(data) {
+  const modeOrder = ['smoke','auth','api','appointments','scenarios','ui','security','edge','infra','authz','chaos','stability','admin','all'];
+  const grid = document.getElementById('an-grid');
+  if (!Object.keys(data).length) { grid.innerHTML = '<div class="an-no-data">Нет данных. Запустите хотя бы один тест.</div>'; return; }
+  grid.innerHTML = '';
+  for (const modeId of modeOrder) {
+    const runs = data[modeId];
+    if (!runs || !runs.length) continue;
+    const last = runs[runs.length - 1];
+    const total = last.pass + last.fail + last.warn;
+    const rate = total ? Math.round(last.pass / total * 100) : 0;
+    const color = rate >= 90 ? '#3fb950' : rate >= 70 ? '#e3b341' : '#f85149';
+    const modeInfo = { smoke:'🔥',auth:'🔐',api:'📡',appointments:'📅',scenarios:'🎭',ui:'🖥',security:'🛡',edge:'🔬',infra:'🏗',authz:'🔒',chaos:'💥',stability:'📊',admin:'👑',all:'🚀' };
+    const icon = modeInfo[modeId] || '▪';
+    const lastDate = new Date(last.startedAt);
+    const ago = fmtAgo(lastDate);
+    const spark = runs.slice(-8).map(r => {
+      const t = r.pass + r.fail + r.warn;
+      const p = t ? Math.round(r.pass / t * 100) : 0;
+      const h = Math.max(2, Math.round(p / 100 * 18));
+      const c = p >= 90 ? '#3fb950' : p >= 70 ? '#e3b341' : '#f85149';
+      return `<div class="an-spark-dot" style="height:${h}px;background:${c}" title="${p}%"></div>`;
+    }).join('');
+    const card = document.createElement('div');
+    card.className = 'an-card';
+    card.dataset.mode = modeId;
+    card.innerHTML = `
+      <div class="an-card-top">
+        <span class="an-card-icon">${icon}</span>
+        <span class="an-card-label">${modeId}</span>
+        <span class="an-card-rate" style="color:${color}">${rate}%</span>
+      </div>
+      <div class="an-card-meta">${runs.length} прогон${runs.length===1?'':'ов'} · ${ago}</div>
+      <div class="an-card-bar"><div class="an-card-fill" style="width:${rate}%;background:${color}"></div></div>
+      <div class="an-spark">${spark}</div>`;
+    card.addEventListener('click', () => showModeChart(modeId, runs, card));
+    grid.appendChild(card);
+  }
+}
+
+function showModeChart(modeId, runs, card) {
+  document.querySelectorAll('.an-card').forEach(c => c.classList.remove('selected'));
+  card.classList.add('selected');
+  const section = document.getElementById('an-chart-section');
+  section.style.display = 'block';
+  document.getElementById('an-chart-mode').textContent = modeId;
+  document.getElementById('an-chart-box').innerHTML = buildSvgChart(runs);
+  section.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function buildSvgChart(runs) {
+  if (runs.length < 2) return '<div class="an-no-data">Нужно минимум 2 прогона для графика</div>';
+  const W = 640, H = 160, pL = 38, pR = 12, pT = 12, pB = 30;
+  const cW = W - pL - pR, cH = H - pT - pB;
+  const pts = runs.map(r => { const t = r.pass+r.fail+r.warn; return t ? r.pass/t*100 : 0; });
+  const avg = pts.reduce((a,b)=>a+b,0)/pts.length;
+  const col = avg >= 90 ? '#3fb950' : avg >= 70 ? '#e3b341' : '#f85149';
+  const x = i => pL + (i/(runs.length-1)) * cW;
+  const y = v => pT + cH - (v/100)*cH;
+  const grid = [0,50,100].map(v =>
+    `<line x1="${pL}" y1="${y(v)}" x2="${pL+cW}" y2="${y(v)}" stroke="#21262d" stroke-width="1"/>` +
+    `<text x="${pL-5}" y="${y(v)+4}" text-anchor="end" fill="#484f58" font-size="9">${v}%</text>`
+  ).join('');
+  const linePts = pts.map((v,i)=>`${x(i)},${y(v)}`).join(' ');
+  const areaPts = `${x(0)},${y(0)} ${linePts} ${x(runs.length-1)},${y(0)}`;
+  const dots = pts.map((v,i) => {
+    const d = new Date(runs[i].startedAt);
+    const lbl = `${d.getDate().toString().padStart(2,'0')}.${(d.getMonth()+1).toString().padStart(2,'0')} ${d.getHours().toString().padStart(2,'0')}:${d.getMinutes().toString().padStart(2,'0')} — ${Math.round(v)}% (✅${runs[i].pass} ❌${runs[i].fail})`;
+    return `<circle cx="${x(i)}" cy="${y(v)}" r="3.5" fill="${col}" stroke="#0d1117" stroke-width="1.5"><title>${lbl}</title></circle>`;
+  }).join('');
+  const xLabels = runs.map((r,i) => {
+    if (runs.length <= 6 || i === 0 || i === runs.length-1 || i % Math.ceil(runs.length/5) === 0) {
+      const d = new Date(r.startedAt);
+      const lbl = `${d.getDate().toString().padStart(2,'0')}.${(d.getMonth()+1).toString().padStart(2,'0')}`;
+      return `<text x="${x(i)}" y="${H-6}" text-anchor="middle" fill="#484f58" font-size="8">${lbl}</text>`;
+    }
+    return '';
+  }).join('');
+  return `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto">
+    ${grid}
+    <polyline points="${areaPts}" fill="${col}" fill-opacity="0.07" stroke="none"/>
+    <polyline points="${linePts}" fill="none" stroke="${col}" stroke-width="2" stroke-linejoin="round"/>
+    ${dots}${xLabels}
+  </svg>`;
+}
+
+function fmtAgo(d) {
+  const s = Math.floor((Date.now() - d) / 1000);
+  if (s < 60) return 'только что';
+  if (s < 3600) return Math.floor(s/60) + ' мин назад';
+  if (s < 86400) return Math.floor(s/3600) + ' ч назад';
+  return Math.floor(s/86400) + ' д назад';
+}
+
+// ─── Failures widget ──────────────────────────────────────────────────────────
+async function loadFailures() {
+  const wrap = document.getElementById('an-failures');
+  try {
+    const r = await api('/api/analytics/failures');
+    if (!r.ok) { wrap.innerHTML = '<div class="an-no-data">Нет данных</div>'; return; }
+    const list = await r.json();
+    renderFailures(list);
+  } catch(e) { wrap.innerHTML = '<div class="an-no-data">' + e.message + '</div>'; }
+}
+
+function renderFailures(list) {
+  const wrap = document.getElementById('an-failures');
+  if (!list.length) {
+    wrap.innerHTML = '<div class="an-no-data">Нет упавших эндпоинтов — всё отлично 🎉</div>'; return;
+  }
+  const rows = list.map(e => {
+    const col = e.failRate >= 80 ? '#f85149' : e.failRate >= 40 ? '#e3b341' : '#d29922';
+    return `<tr>
+      <td><code style="color:var(--cyan)">${e.method}</code></td>
+      <td style="font-family:var(--mono);font-size:10px;color:var(--text)">${e.endpoint}</td>
+      <td class="fail-cnt" style="color:#f85149">${e.fail}</td>
+      <td class="fail-cnt" style="color:var(--muted)">${e.total}</td>
+      <td>
+        <div style="display:flex;align-items:center;gap:5px">
+          <div class="fail-rate-bar"><div class="fail-rate-fill" style="width:${e.failRate}%;background:${col}"></div></div>
+          <span style="font-family:var(--mono);font-size:10px;color:${col}">${e.failRate}%</span>
+        </div>
+      </td>
+    </tr>`;
+  }).join('');
+  wrap.innerHTML = `<table class="fail-table">
+    <thead><tr><th>Метод</th><th>Эндпоинт</th><th>❌ Упало</th><th>Всего</th><th>% отказов</th></tr></thead>
+    <tbody>${rows}</tbody>
+  </table>`;
+}
+
+// ─── Coverage ─────────────────────────────────────────────────────────────────
+async function loadCoverage() {
+  const wrap = document.getElementById('an-coverage');
+  try {
+    const [rStatic, rActuals] = await Promise.all([
+      api('/api/coverage'),
+      api('/api/analytics/actuals'),
+    ]);
+    const cov     = rStatic.ok  ? await rStatic.json()  : {};
+    const actuals = rActuals.ok ? await rActuals.json() : {};
+    renderCoverage(cov, actuals);
+  } catch(e) { wrap.innerHTML = '<div class="an-no-data">' + e.message + '</div>'; }
+}
+
+function renderCoverage(cov, actuals = {}) {
+  const wrap = document.getElementById('an-coverage');
+  const modeOrder = ['smoke','auth','api','appointments','scenarios','ui','security','edge','infra','authz','chaos','stability','admin','all'];
+  const icons = {smoke:'🔥',auth:'🔐',api:'📡',appointments:'📅',scenarios:'🎭',ui:'🖥',security:'🛡',edge:'🔬',infra:'🏗',authz:'🔒',chaos:'💥',stability:'📊',admin:'👑',all:'🚀'};
+  const allModes = [...new Set([...modeOrder, ...Object.keys(actuals)])].filter(m => cov[m] || actuals[m]);
+  wrap.innerHTML = allModes.map((modeId, idx) => {
+    const live   = actuals[modeId];
+    const static_ = cov[modeId];
+    const checks  = live ? live.checks : (static_?.checks || []);
+    const isLive  = !!live;
+    const badge   = isLive
+      ? `<span class="cov-live-badge">● прогон ${new Date(live.startedAt).toLocaleDateString('ru-RU',{day:'2-digit',month:'2-digit'})}</span>`
+      : `<span class="cov-static-badge">задокументировано</span>`;
+    const rows = checks.map(c => {
+      const statusIcon = c.status ? (c.status==='pass'?'✅':c.status==='fail'?'❌':'⚠️') : '';
+      return `<tr><td>${c.method}</td><td>${c.endpoint}</td><td>${statusIcon} ${c.what}</td></tr>`;
+    }).join('');
+    const total = static_?.total || checks.length;
+    return `<details class="cov-mode"${idx===0?' open':''}>
+      <summary class="cov-summary">
+        <span class="cov-icon">${icons[modeId]||'▪'}</span>
+        <span>${modeId}</span>${badge}
+        <span class="cov-cnt">${total} проверок</span>
+      </summary>
+      <table class="cov-table"><tbody>${rows}</tbody></table>
+    </details>`;
+  }).join('');
+}
+const SECTIONS = [
+  { label: 'Быстрые',            cats: ['quick'] },
+  { label: 'Функциональные',     cats: ['functional'] },
+  { label: 'Безопасность',       cats: ['security'] },
+  { label: 'Производительность', cats: ['perf'] },
+  { label: 'Специальные',        cats: ['admin','all'] },
+];
+
+// ─── API helper ───────────────────────────────────────────────────────────────
+async function api(url, opts = {}) {
+  if (authToken) {
+    opts.headers = { ...(opts.headers || {}), Authorization: 'Bearer ' + authToken };
+  }
+  const r = await fetch(url, opts);
+  if (r.status === 401) {
+    const j = await r.json().catch(() => ({}));
+    if (j.requiresAuth) showAuthOverlay();
+    throw new Error('Unauthorized');
+  }
+  return r;
+}
+
+// ─── Boot ─────────────────────────────────────────────────────────────────────
+async function init() {
+  try {
+    const [mRes, sRes] = await Promise.all([api('/api/modes'), api('/api/status')]);
+    modes        = await mRes.json();
+    serverStatus = await sRes.json();
+    modes.forEach(m => CAT_BY_MODE[m.id] = m.cat);
+    renderSidebar();
+    restoreConfig();
+    updateNotifBtn();
+    loadHistory();
+    // Show Telegram hint if configured server-side
+    if (serverStatus.telegram) showToast('ℹ️ Telegram-уведомления активны (настроены на сервере)');
+  } catch (e) {
+    if (e.message !== 'Unauthorized') showToast('⚠️ Нет соединения с сервером');
+  }
+}
+
+// ─── Auth ─────────────────────────────────────────────────────────────────────
+function showAuthOverlay() { document.getElementById('auth-overlay').style.display = 'flex'; }
+async function submitToken() {
+  const input = document.getElementById('auth-input');
+  authToken = input.value.trim();
+  localStorage.setItem('dashboard-token', authToken);
+  document.getElementById('auth-overlay').style.display = 'none';
+  await init();
+}
+
+// ─── Config ───────────────────────────────────────────────────────────────────
+const CFG_KEYS = ['cfg-url','cfg-slow','cfg-email','cfg-quiet','cfg-verbose','cfg-tg-token','cfg-tg-chat','cfg-tg-on'];
+
+function restoreConfig() {
+  CFG_KEYS.forEach(id => {
+    const el = document.getElementById(id);
+    const v  = localStorage.getItem(id);
+    if (!el || v === null) return;
+    if (el.type === 'checkbox') el.checked = v === 'true';
+    else el.value = v;
+  });
+  syncUrlBadge();
+  renderProfiles();
+}
+
+function saveConfig() {
+  CFG_KEYS.forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    localStorage.setItem(id, el.type === 'checkbox' ? String(el.checked) : el.value);
+  });
+  syncUrlBadge();
+}
+
+function syncUrlBadge() {
+  const v = document.getElementById('cfg-url').value.trim();
+  document.getElementById('hdr-url').textContent = v || 'http://95.31.169.106';
+}
+
+document.addEventListener('input',  e => { if (e.target.closest('.config-wrap')) saveConfig(); });
+document.addEventListener('change', e => { if (e.target.closest('.config-wrap')) saveConfig(); });
+
+function getConfig() {
+  const tgOn  = document.getElementById('cfg-tg-on') && document.getElementById('cfg-tg-on').checked;
+  const tgTok = document.getElementById('cfg-tg-token').value.trim();
+  const tgChat= document.getElementById('cfg-tg-chat').value.trim();
+  return {
+    baseUrl:       document.getElementById('cfg-url').value.trim()   || undefined,
+    slowMs:        parseInt(document.getElementById('cfg-slow').value) || undefined,
+    adminEmail:    document.getElementById('cfg-email').value.trim()  || undefined,
+    adminPassword: document.getElementById('cfg-pass').value          || undefined,
+    quiet:         document.getElementById('cfg-quiet').checked,
+    verbose:       document.getElementById('cfg-verbose').checked,
+    telegramToken: tgOn && tgTok ? tgTok : undefined,
+    telegramChat:  tgOn && tgChat? tgChat: undefined,
+  };
+}
+
+// ─── Profiles ─────────────────────────────────────────────────────────────────
+function getProfiles() { try { return JSON.parse(localStorage.getItem('cfg-profiles') || '[]'); } catch(_){return [];} }
+function setProfiles(p) { localStorage.setItem('cfg-profiles', JSON.stringify(p)); }
+
+function renderProfiles() {
+  const sel = document.getElementById('profiles-select');
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">— Профили —</option>';
+  for (const p of getProfiles()) {
+    const opt = document.createElement('option');
+    opt.value = p.name; opt.textContent = p.name;
+    sel.appendChild(opt);
+  }
+  if (cur) sel.value = cur;
+}
+
+function saveProfile() {
+  const name = prompt('Название профиля:');
+  if (!name) return;
+  const profiles = getProfiles().filter(p => p.name !== name);
+  const snap = {};
+  CFG_KEYS.forEach(id => { const el = document.getElementById(id); if (el) snap[id] = el.type === 'checkbox' ? el.checked : el.value; });
+  profiles.unshift({ name, ...snap });
+  setProfiles(profiles);
+  renderProfiles();
+  document.getElementById('profiles-select').value = name;
+  showToast('✅ Профиль «' + name + '» сохранён');
+}
+
+function loadProfile() {
+  const name = document.getElementById('profiles-select').value;
+  if (!name) return;
+  const p = getProfiles().find(x => x.name === name);
+  if (!p) return;
+  CFG_KEYS.forEach(id => {
+    const el = document.getElementById(id);
+    if (!el || !(id in p)) return;
+    if (el.type === 'checkbox') el.checked = p[id] === true || p[id] === 'true';
+    else el.value = p[id];
+  });
+  saveConfig();
+  showToast('Профиль «' + name + '» загружен');
+}
+
+function deleteProfile() {
+  const name = document.getElementById('profiles-select').value;
+  if (!name || !confirm('Удалить профиль «' + name + '»?')) return;
+  setProfiles(getProfiles().filter(p => p.name !== name));
+  renderProfiles();
+  showToast('Профиль удалён');
+}
+
+// ─── Sidebar ──────────────────────────────────────────────────────────────────
+function renderSidebar() {
+  const sb = document.getElementById('sidebar');
+  sb.innerHTML = '';
+  for (const sec of SECTIONS) {
+    const ml = modes.filter(m => sec.cats.includes(m.cat));
+    if (!ml.length) continue;
+    const lbl = document.createElement('div');
+    lbl.className = 'sb-label'; lbl.textContent = sec.label;
+    sb.appendChild(lbl);
+    ml.forEach(m => sb.appendChild(makeModeBtn(m)));
+  }
+}
+
+function makeModeBtn(mode) {
+  const btn = document.createElement('button');
+  btn.className = 'mode-btn'; btn.dataset.id = mode.id;
+  btn.innerHTML = `<span class="m-icon">${mode.icon}</span>
+    <div class="m-info"><div class="m-name">${mode.label}</div><div class="m-est">${mode.est}</div></div>
+    <span class="m-badge c-${mode.cat}">${mode.cat}</span>`;
+  btn.addEventListener('click', () => selectMode(mode));
+  return btn;
+}
+
+function selectMode(mode) {
+  selectedMode = mode;
+  document.querySelectorAll('.mode-btn').forEach(b => b.classList.toggle('selected', b.dataset.id === mode.id));
+  document.getElementById('sel-icon').textContent = mode.icon;
+  document.getElementById('sel-name').textContent = mode.label;
+  document.getElementById('sel-desc').textContent = mode.desc;
+  document.getElementById('btn-run').disabled = false;
+  document.getElementById('term-title').textContent = `node test-suite.js --${mode.id}`;
+}
+
+// ─── Run ──────────────────────────────────────────────────────────────────────
+async function startRun() {
+  if (!selectedMode) return;
+  const cfg = getConfig();
+  if (selectedMode.requiresAdmin && (!cfg.adminEmail || !cfg.adminPassword)) {
+    showToast('⚠️ Укажите ADMIN_EMAIL и ADMIN_PASSWORD в настройках');
+    document.getElementById('cfg-details').open = true;
+    return;
+  }
+  document.getElementById('btn-run').disabled = true;
+  document.getElementById('btn-stop').style.display = '';
+  document.getElementById('btn-rerun').style.display = 'none';
+  document.getElementById('report-drop-wrap').classList.remove('visible');
+  document.getElementById('spin').style.display = '';
+  document.getElementById('stats-bar').style.display = 'none';
+  if (selectedMode.id === 'all') {
+    document.getElementById('progress-wrap').style.display = '';
+    updateProgress(null, 0, 0);
+  }
+  setStatus('running', '● Running…');
+  clearTerminal();
+  timerStart = Date.now();
+  timerIv = setInterval(tickTimer, 1000);
+  try {
+    const r = await api('/api/run', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode: selectedMode.id, config: cfg }),
+    });
+    const d = await r.json();
+    if (!r.ok) { showToast('❌ ' + (d.error || 'Ошибка')); resetRunUI(); return; }
+    currentRunId = d.runId;
+    openStream(currentRunId);
+  } catch(e) {
+    if (e.message !== 'Unauthorized') showToast('Ошибка соединения');
+    resetRunUI();
+  }
+}
+
+async function stopRun() {
+  if (!currentRunId) return;
+  await api(`/api/run/${currentRunId}`, { method: 'DELETE' });
+  if (currentSse) currentSse.close();
+  resetRunUI(); setStatus('cancelled', '● Отменено'); loadHistory();
+}
+
+async function rerunLast() {
+  if (!currentRunId) return;
+  try {
+    const r = await api(`/api/runs/${currentRunId}/rerun`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(getConfig()),
+    });
+    const d = await r.json();
+    if (!r.ok) { showToast('❌ ' + (d.error || 'Ошибка')); return; }
+    document.getElementById('btn-run').disabled = true;
+    document.getElementById('btn-stop').style.display = '';
+    document.getElementById('btn-rerun').style.display = 'none';
+    document.getElementById('spin').style.display = '';
+    document.getElementById('stats-bar').style.display = 'none';
+    setStatus('running', '● Running…');
+    clearTerminal();
+    timerStart = Date.now();
+    timerIv = setInterval(tickTimer, 1000);
+    currentRunId = d.runId;
+    openStream(currentRunId);
+  } catch(e) { if (e.message !== 'Unauthorized') showToast('Ошибка'); }
+}
+
+function resetRunUI() {
+  clearInterval(timerIv);
+  document.getElementById('btn-run').disabled = !selectedMode;
+  document.getElementById('btn-stop').style.display = 'none';
+  document.getElementById('spin').style.display = 'none';
+  document.getElementById('run-timer').textContent = '';
+}
+
+function tickTimer() {
+  const s = Math.floor((Date.now() - timerStart) / 1000);
+  document.getElementById('run-timer').textContent = s < 60 ? s + 'с' : Math.floor(s/60) + 'м ' + (s%60) + 'с';
+}
+
+function setStatus(cls, text) {
+  const el = document.getElementById('hdr-status');
+  el.className = 'hdr-status s-' + cls; el.textContent = text;
+}
+
+// ─── SSE ──────────────────────────────────────────────────────────────────────
+function openStream(runId) {
+  if (currentSse) currentSse.close();
+  const headers = authToken ? `?token=${encodeURIComponent(authToken)}` : '';
+  currentSse = new EventSource(`/api/stream/${runId}${headers}`);
+  currentSse.onmessage = e => {
+    const msg = JSON.parse(e.data);
+    if (msg.line !== undefined) appendLine(msg.line);
+    if (msg.section) updateProgress(msg.section, msg.sectionIndex, msg.totalSections);
+    if (msg.done) { currentSse.close(); onDone(msg.pass, msg.fail, msg.warn); }
+  };
+  currentSse.onerror = () => {
+    currentSse.close(); resetRunUI(); setStatus('fail', '● Ошибка'); loadHistory();
+  };
+}
+
+function updateProgress(section, idx, total) {
+  const pct = total > 0 ? Math.round((idx / total) * 100) : 0;
+  document.getElementById('progress-bar').style.width = pct + '%';
+  document.getElementById('progress-pct').textContent  = pct + '%';
+  document.getElementById('progress-text').textContent = section
+    ? `${section.toUpperCase()} [${idx}/${total}]` : 'Запуск…';
+}
+
+function onDone(pass, fail, warn) {
+  resetRunUI();
+  const cls = fail > 0 ? 'fail' : 'done';
+  setStatus(cls, fail > 0 ? `❌ ${fail} упало` : '✅ Всё прошло');
+  document.getElementById('stats-bar').style.display = 'flex';
+  document.getElementById('s-pass').textContent = pass;
+  document.getElementById('s-fail').textContent = fail;
+  document.getElementById('s-warn').textContent = warn;
+  document.getElementById('progress-wrap').style.display = 'none';
+  if (currentRunId) {
+    document.getElementById('btn-rerun').style.display = '';
+    document.getElementById('report-drop-wrap').classList.add('visible');
+  }
+  loadHistory();
+  if (notifEnabled && document.hidden) {
+    const icon = fail > 0 ? '❌' : '✅';
+    new Notification(`${icon} Тест завершён`, {
+      body: `✅ ${pass} | ❌ ${fail} | ⚠️ ${warn}`,
+      icon: '/favicon.ico',
+    });
+  }
+}
+
+// ─── Terminal ─────────────────────────────────────────────────────────────────
+const termOut = document.getElementById('term-out');
+termOut.addEventListener('scroll', () => {
+  autoScroll = termOut.scrollTop + termOut.clientHeight >= termOut.scrollHeight - 32;
+});
+
+function clearTerminal() { termOut.innerHTML = ''; autoScroll = true; searchMatches = []; searchIdx = -1; }
+
+function appendLine(text) {
+  const el = document.createElement('div');
+  el.className = 'tl ' + lineClass(text);
+  el.textContent = text;
+  applyFilter(el);
+  termOut.appendChild(el);
+  if (autoScroll) termOut.scrollTop = termOut.scrollHeight;
+}
+
+const SEC_EMOJIS = ['🔥','🔐','📡','📅','🛡','🎭','💥','🔬','🏗','🔒','📊','🖥','👑','🚀'];
+function lineClass(l) {
+  if (l.includes('✅')) return 'tl-pass';
+  if (l.includes('❌')) return 'tl-fail';
+  if (l.includes('⚠️')) return 'tl-warn';
+  if (l.startsWith('[ERR]')) return 'tl-err';
+  if (/^[─═]/.test(l)) return 'tl-sep';
+  if (/^\s*(Итог|ИТОГ):/.test(l)) return 'tl-summary';
+  if (l.includes('📄') || l.includes('📋')) return 'tl-report';
+  const t = l.trimStart();
+  if (SEC_EMOJIS.some(em => t.startsWith(em))) return 'tl-header';
+  if (t.startsWith('—') || t.startsWith('–')) return 'tl-dim';
+  return '';
+}
+
+function applyFilter(el) {
+  if (activeFilter === 'all') { el.hidden = false; return; }
+  const cls = el.className;
+  el.hidden = !(
+    (activeFilter === 'fail' && cls.includes('tl-fail')) ||
+    (activeFilter === 'warn' && cls.includes('tl-warn')) ||
+    (activeFilter === 'pass' && cls.includes('tl-pass'))
+  );
+}
+
+function setFilter(f, btn) {
+  activeFilter = f;
+  document.querySelectorAll('.tfb[data-filter]').forEach(b => b.classList.toggle('active', b.dataset.filter === f));
+  document.querySelectorAll('.tl').forEach(applyFilter);
+}
+
+function copyOutput() {
+  const text = [...termOut.querySelectorAll('.tl')].map(el => el.textContent).join('\n');
+  if (!text) return;
+  navigator.clipboard.writeText(text).then(() => showToast('✅ Скопировано'));
+}
+
+function toggleReportMenu(e) {
+  e.stopPropagation();
+  document.getElementById('report-drop-menu').classList.toggle('open');
+}
+document.addEventListener('click', () => {
+  document.getElementById('report-drop-menu')?.classList.remove('open');
+});
+
+function openReport(action, type) {
+  document.getElementById('report-drop-menu').classList.remove('open');
+  if (!currentRunId) return;
+  if (action === 'dl') {
+    if (type === 'json') window.open(`/api/runs/${currentRunId}/results.json?download`, '_blank');
+    else if (type === 'md') window.open(`/api/runs/${currentRunId}/report.md?download`, '_blank');
+    else window.open(`/api/runs/${currentRunId}/report.html?type=${type}&download`, '_blank');
+  } else {
+    window.open(`/api/runs/${currentRunId}/report.html?type=${type}`, '_blank');
+  }
+}
+
+// ─── Search ───────────────────────────────────────────────────────────────────
+function openSearch() {
+  document.getElementById('search-bar').style.display = 'flex';
+  document.getElementById('search-input').focus();
+}
+function closeSearch() {
+  document.getElementById('search-bar').style.display = 'none';
+  document.querySelectorAll('.tl-search-match').forEach(el => el.classList.remove('tl-search-match'));
+  searchMatches = []; searchIdx = -1;
+  document.getElementById('search-input').value = '';
+}
+function doSearch() {
+  const q = document.getElementById('search-input').value.toLowerCase();
+  document.querySelectorAll('.tl-search-match').forEach(el => el.classList.remove('tl-search-match'));
+  searchMatches = [];
+  if (!q) { document.getElementById('search-info').textContent = '0 совпадений'; return; }
+  document.querySelectorAll('.tl').forEach(el => {
+    if (el.textContent.toLowerCase().includes(q)) {
+      el.classList.add('tl-search-match');
+      searchMatches.push(el);
+    }
+  });
+  searchIdx = searchMatches.length ? 0 : -1;
+  document.getElementById('search-info').textContent = searchMatches.length + ' совпадений';
+  if (searchMatches.length) searchMatches[0].scrollIntoView({ block: 'center' });
+}
+function searchMove(dir) {
+  if (!searchMatches.length) return;
+  searchIdx = (searchIdx + dir + searchMatches.length) % searchMatches.length;
+  searchMatches[searchIdx].scrollIntoView({ block: 'center' });
+}
+function searchNav(e) {
+  if (e.key === 'Enter')        { e.preventDefault(); searchMove(e.shiftKey ? -1 : 1); }
+  else if (e.key === 'Escape')  closeSearch();
+}
+
+// ─── Browser notifications ────────────────────────────────────────────────────
+async function toggleNotifications() {
+  if (!('Notification' in window)) { showToast('Браузер не поддерживает уведомления'); return; }
+  if (notifEnabled) {
+    notifEnabled = false;
+    localStorage.setItem('notif-enabled', 'false');
+    updateNotifBtn(); showToast('🔕 Уведомления отключены');
+    return;
+  }
+  const perm = await Notification.requestPermission();
+  if (perm === 'granted') {
+    notifEnabled = true;
+    localStorage.setItem('notif-enabled', 'true');
+    updateNotifBtn(); showToast('🔔 Уведомления включены');
+  } else {
+    showToast('⚠️ Разрешение отклонено');
+  }
+}
+function updateNotifBtn() {
+  const btn = document.getElementById('notif-btn');
+  btn.classList.toggle('active', notifEnabled);
+  btn.title = notifEnabled ? 'Уведомления включены (нажать для отключения)' : 'Включить уведомления браузера';
+}
+
+// ─── History ──────────────────────────────────────────────────────────────────
+let allRuns = [];
+let histFilter = { status: 'all', mode: 'all' };
+
+async function loadHistory() {
+  try {
+    const r = await api('/api/runs');
+    allRuns  = await r.json();
+    updateModeSelect(allRuns);
+    renderHistory(allRuns);
+  } catch(_) {}
+}
+
+function updateModeSelect(runs) {
+  const sel   = document.getElementById('hist-mode-select');
+  const modes = [...new Set(runs.map(r => r.mode))].sort();
+  const cur   = sel.value;
+  sel.innerHTML = '<option value="all">Все режимы</option>' +
+    modes.map(m => `<option value="${m}"${m===cur?' selected':''}>${m}</option>`).join('');
+}
+
+function setHistFilter(key, val, btn) {
+  histFilter[key] = val;
+  if (btn) {
+    btn.closest('.hist-filters').querySelectorAll('.hf-btn').forEach(b => {
+      if (b.onclick?.toString().includes(`'${key}'`)) b.classList.remove('active');
+    });
+    btn.classList.add('active');
+  }
+  applyHistoryFilter();
+}
+
+function setHistModeFilter(val) {
+  histFilter.mode = val;
+  applyHistoryFilter();
+}
+
+function applyHistoryFilter() {
+  const rows = document.querySelectorAll('#hist-body tr[data-run-id]');
+  let visible = 0;
+  rows.forEach(tr => {
+    const run = allRuns.find(r => r.id === tr.dataset.runId);
+    if (!run) return;
+    const statusOk = histFilter.status === 'all'
+      || (histFilter.status === 'fail' && run.fail > 0 && run.status !== 'running')
+      || (histFilter.status === 'pass' && run.fail === 0 && run.status === 'done');
+    const modeOk = histFilter.mode === 'all' || run.mode === histFilter.mode;
+    tr.style.display = statusOk && modeOk ? '' : 'none';
+    if (statusOk && modeOk) visible++;
+  });
+  const empty = document.querySelector('#hist-body .hist-empty');
+  if (empty) empty.style.display = visible === 0 && rows.length > 0 ? '' : 'none';
+}
+
+function buildTrendMap(runs) {
+  const map = {};
+  for (const r of [...runs].reverse()) {
+    if (!map[r.mode]) map[r.mode] = [];
+    if (map[r.mode].length < 6) map[r.mode].push(r);
+  }
+  return map;
+}
+
+function renderHistory(runs) {
+  const body    = document.getElementById('hist-body');
+  const trendMap = buildTrendMap(runs);
+  if (!runs.length) { body.innerHTML = '<div class="hist-empty">Нет запусков</div>'; return; }
+
+  const table = document.createElement('table');
+  table.className = 'hist-table';
+  table.innerHTML = `<thead><tr>
+    <th></th><th>Режим</th><th>Дата</th><th>Время</th>
+    <th>✅</th><th>❌</th><th>⚠️</th><th>Тренд</th><th>Статус</th><th></th>
+  </tr></thead>`;
+
+  const tbody = document.createElement('tbody');
+  for (const run of runs) {
+    const cat = CAT_BY_MODE[run.mode] || 'quick';
+    const dur = run.endedAt && run.startedAt
+      ? fmtDur(new Date(run.endedAt) - new Date(run.startedAt))
+      : run.status === 'running' ? '⏳' : '—';
+    const date = new Date(run.startedAt).toLocaleString('ru-RU',
+      { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+    const trend = (trendMap[run.mode] || []).map(r => {
+      const c = r.fail > 0 ? '#f85149' : r.warn > 0 ? '#d29922' : '#3fb950';
+      return `<span class="trend-dot" style="background:${c}" title="${r.startedAt.slice(0,10)}: ${r.pass}✅ ${r.fail}❌"></span>`;
+    }).join('');
+    const checked = selectedForCompare.includes(run.id);
+    const tr = document.createElement('tr');
+    tr.dataset.runId  = run.id;
+    tr.dataset.runMode   = run.mode;
+    tr.dataset.runStatus = run.status;
+    tr.dataset.runFail   = run.fail || 0;
+    tr.innerHTML = `
+      <td><input type="checkbox" class="cmp-check" ${checked?'checked':''} onchange="toggleCompareSelect('${run.id}',this)"></td>
+      <td><span class="mode-tag c-${cat}">${run.mode}</span></td>
+      <td class="mono" style="color:var(--muted)">${date}</td>
+      <td class="mono" style="color:var(--muted)">${dur}</td>
+      <td class="pass-n">${run.status==='running'?'…':run.pass}</td>
+      <td class="fail-n">${run.status==='running'?'…':run.fail}</td>
+      <td class="warn-n">${run.status==='running'?'…':run.warn}</td>
+      <td><div class="trend">${trend}</div></td>
+      <td>${fmtStatus(run.status, run.fail)}</td>
+      <td><button class="btn-view" data-id="${run.id}">Открыть</button></td>`;
+    tbody.appendChild(tr);
+  }
+  table.appendChild(tbody);
+  body.innerHTML = ''; body.appendChild(table);
+  body.querySelectorAll('.btn-view').forEach(btn =>
+    btn.addEventListener('click', () => viewRun(btn.dataset.id)));
+  applyHistoryFilter();
+}
+
+function fmtDur(ms) {
+  if (ms < 1000) return ms + 'ms';
+  const s = Math.floor(ms / 1000);
+  return s < 60 ? s + 'с' : `${Math.floor(s/60)}м ${s%60}с`;
+}
+
+function fmtStatus(status, fail) {
+  if (status === 'running')   return '<span style="color:var(--yellow)">⏳ running</span>';
+  if (status === 'cancelled') return '<span style="color:var(--purple)">cancelled</span>';
+  if (status === 'done' && !fail) return '<span style="color:var(--green)">✅ passed</span>';
+  if (status === 'done')      return `<span style="color:var(--red)">❌ ${fail} failed</span>`;
+  return status;
+}
+
+async function viewRun(runId) {
+  try {
+    const r = await api(`/api/runs/${runId}/output`);
+    if (!r.ok) { showToast('Данные недоступны'); return; }
+    const data = await r.json();
+    clearTerminal();
+    document.getElementById('stats-bar').style.display = 'flex';
+    document.getElementById('s-pass').textContent = data.pass || 0;
+    document.getElementById('s-fail').textContent = data.fail || 0;
+    document.getElementById('s-warn').textContent = data.warn || 0;
+    currentRunId = runId;
+    document.getElementById('report-drop-wrap').classList.add('visible');
+    if (data.fail > 0) document.getElementById('btn-rerun').style.display = '';
+    for (const line of (data.lines || [])) if (line) appendLine(line);
+    termOut.scrollTop = 0; autoScroll = false;
+    showToast('Загружен прошлый прогон');
+  } catch(_) { showToast('Ошибка загрузки'); }
+}
+
+async function clearHistory() {
+  if (!confirm('Удалить всю историю?')) return;
+  try {
+    const r    = await api('/api/runs');
+    const runs = await r.json();
+    await Promise.all(runs.filter(r => r.status !== 'running')
+      .map(r => api(`/api/runs/${r.id}`, { method: 'DELETE' })));
+    selectedForCompare = [];
+    updateCompareBtn();
+    loadHistory();
+  } catch(_) { showToast('Ошибка очистки'); }
+}
+
+// ─── Compare ──────────────────────────────────────────────────────────────────
+function toggleCompareSelect(runId, checkbox) {
+  if (checkbox.checked) {
+    if (!selectedForCompare.includes(runId)) selectedForCompare.push(runId);
+    if (selectedForCompare.length > 2) {
+      const old = selectedForCompare.shift();
+      const row = document.querySelector(`tr[data-run-id="${old}"] .cmp-check`);
+      if (row) row.checked = false;
+    }
+  } else {
+    selectedForCompare = selectedForCompare.filter(x => x !== runId);
+  }
+  updateCompareBtn();
+}
+
+function updateCompareBtn() {
+  document.getElementById('btn-compare').style.display =
+    selectedForCompare.length === 2 ? '' : 'none';
+}
+
+async function runCompare() {
+  if (selectedForCompare.length !== 2) return;
+  const [a, b] = selectedForCompare;
+  try {
+    const r = await api(`/api/compare?a=${a}&b=${b}`);
+    const d = await r.json();
+    renderCompare(d);
+  } catch(_) { showToast('Ошибка сравнения'); }
+}
+
+function renderCompare(data) {
+  const wrap = document.getElementById('compare-wrap');
+  const meta = document.getElementById('cmp-meta');
+  const body = document.getElementById('cmp-body');
+  wrap.style.display = '';
+
+  const da = new Date(data.runA.startedAt).toLocaleString('ru-RU',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
+  const db = new Date(data.runB.startedAt).toLocaleString('ru-RU',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
+  meta.textContent = `A: ${data.runA.mode} (${da}) → B: ${data.runB.mode} (${db})`;
+
+  const s = data.summary;
+  const changed   = data.changes.filter(c => c.type === 'changed');
+  const nonSame   = data.changes.filter(c => c.type !== 'unchanged');
+
+  const rows = nonSame.map(c => {
+    const sa = c.a ? (c.a.status==='pass'?'✅':c.a.status==='fail'?'❌':'⚠️') : '—';
+    const sb = c.b ? (c.b.status==='pass'?'✅':c.b.status==='fail'?'❌':'⚠️') : '—';
+    return `<tr class="cmp-${c.type}">
+      <td style="color:var(--muted);font-family:var(--mono);font-size:10px">${c.a?.method||c.b?.method||''}</td>
+      <td class="cmp-key" style="word-break:break-all;font-family:var(--mono);font-size:10px">${c.key.replace(/^\S+\s/,'')}</td>
+      <td style="text-align:center">${sa}</td>
+      <td style="text-align:center">→</td>
+      <td style="text-align:center">${sb}</td>
+      <td style="font-size:10px;color:var(--muted)">${c.type}</td>
+    </tr>`;
+  }).join('');
+
+  body.innerHTML = `
+    <div style="padding:8px 14px;font-size:11px;color:var(--muted);border-bottom:1px solid var(--border)">
+      🔴 Изменились: <b style="color:var(--red)">${s.changed}</b> &nbsp;
+      🟢 Добавились: <b style="color:var(--green)">${s.added}</b> &nbsp;
+      🔵 Удалились: <b style="color:var(--purple)">${s.removed}</b> &nbsp;
+      ⚪ Без изменений: <b>${s.unchanged}</b>
+    </div>
+    ${nonSame.length ? `<table class="cmp-table">
+      <thead><tr><th>Метод</th><th>Эндпоинт</th><th>A</th><th></th><th>B</th><th>Тип</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>` : '<div style="padding:14px;color:var(--green);font-size:12px;text-align:center">✅ Различий не обнаружено</div>'}`;
+}
+
+function closeCompare() {
+  document.getElementById('compare-wrap').style.display = 'none';
+  selectedForCompare = [];
+  updateCompareBtn();
+  document.querySelectorAll('.cmp-check').forEach(c => c.checked = false);
+}
+
+// ─── Utils ────────────────────────────────────────────────────────────────────
+let toastTm;
+function showToast(msg) {
+  document.querySelectorAll('.toast').forEach(el => el.remove());
+  clearTimeout(toastTm);
+  const el = document.createElement('div');
+  el.className = 'toast'; el.textContent = msg;
+  document.body.appendChild(el);
+  toastTm = setTimeout(() => el.remove(), 3500);
+}
+
+// ─── Keyboard shortcuts ───────────────────────────────────────────────────────
+document.addEventListener('keydown', e => {
+  if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
+    e.preventDefault(); openSearch();
+  }
+  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+    const btn = document.getElementById('btn-run');
+    if (selectedMode && !btn.disabled) startRun();
+  }
+  if (e.key === 'Escape') {
+    const stop = document.getElementById('btn-stop');
+    if (stop.style.display !== 'none') stopRun();
+    else closeSearch();
+  }
+});
+
+init();
+</script>
+</body>
+</html>
