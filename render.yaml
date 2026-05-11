@@ -2,14 +2,10 @@ services:
   - type: web
     name: psychohelp-test-suite
     runtime: docker
-    plan: starter
+    plan: free
     dockerfilePath: ./Dockerfile
     dockerContext: .
     healthCheckPath: /healthz
-    disk:
-      name: runs
-      mountPath: /app/runs
-      sizeGB: 10
     envVars:
       - key: NODE_ENV
         value: production
